@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <StartupObject>Thermopilot.Program</StartupObject>
+    <RootNamespace>Thermopilot</RootNamespace>
+    <AssemblyName>Thermopilot</AssemblyName>
+    <FileAlignment>512</FileAlignment>
+    <MyType>WindowsForms</MyType>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG,TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>1</WarningLevel>
+    <NoWarn>41999,42016,42017,42018,42019,42020,42021,42022,42032,42036</NoWarn>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>1</WarningLevel>
+    <NoWarn>41999,42016,42017,42018,42019,42020,42021,42022,42032,42036</NoWarn>
+  </PropertyGroup>
+  <PropertyGroup>
+    <OptionInfer>On</OptionInfer>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>icone_TP.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Ports, Version=10.0.0.5, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>packages\System.IO.Ports.10.0.5\lib\net462\System.IO.Ports.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="Microsoft.VisualBasic" />
+    <!-- OxyPlot — installer via NuGet : Install-Package OxyPlot.WindowsForms -->
+    <Reference Include="OxyPlot">
+      <HintPath>packages\OxyPlot.Core.2.1.2\lib\net45\OxyPlot.dll</HintPath>
+    </Reference>
+    <Reference Include="OxyPlot.WindowsForms">
+      <HintPath>packages\OxyPlot.WindowsForms.2.1.2\lib\net45\OxyPlot.WindowsForms.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.vb" />
+    <Compile Include="FormSplash.vb">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ParseurDuree.vb" />
+    <Compile Include="FormNotification.vb">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ContexteCSVChronogramme.vb" />
+    <Compile Include="GenerateurRapport.vb" />
+    <Compile Include="OngletRapport.vb" />
+    <Compile Include="ConfigManager.vb" />
+    <Compile Include="ModeleCentrale.vb" />
+    <Compile Include="CentraleKeithley.vb" />
+    <Compile Include="Peripheriques.vb" />
+    <Compile Include="FormDetailsCentrale.vb">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormValeursBrutes.vb">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormPersonnalisationGraphique.vb">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="OngletConnexion.vb" />
+    <Compile Include="OngletCSV.vb" />
+    <Compile Include="OngletVoies.vb" />
+    <Compile Include="OngletVisuCSV.vb" />
+    <Compile Include="OngletSysteme.vb" />
+    <Compile Include="PanneauInfoDebit.vb" />
+    <Compile Include="MoteurAlarmes.vb" />
+    <Compile Include="KeithleyComm.vb" />
+    <Compile Include="VoieMesure.vb" />
+    <Compile Include="Chronogramme.vb" />
+    <Compile Include="Acquisition.vb" />
+    <Compile Include="FormPrincipal.vb">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="StylesGraphique.vb" />
+    <Compile Include="VoieCalculee.vb" />
+    <Compile Include="OngletCalculs.vb" />
+    <Compile Include="PanelGraphique.vb">
+      <SubType>UserControl</SubType>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="My Project\" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="icone_TP.ico" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.VisualBasic.targets" />
+</Project>

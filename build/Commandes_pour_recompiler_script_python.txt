@@ -1,0 +1,4 @@
+0) Ouvrir un cmd depuis le dossier où se trouve generer_rapport.py
+1) Verifier que pyinstaller est bien présent : python -m pip install pyinstaller
+2) Compiler le projet : python -m PyInstaller --onefile generer_rapport.py
+3) Recuperer dist\generer_rapport.exe et le placer dans le dossier où se trouve l'executable Thermopilot.exe

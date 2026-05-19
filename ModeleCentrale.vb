@@ -7,7 +7,8 @@ Imports System.Linq
 ' ═══════════════════════════════════════════════════════════════════════════════
 
 Public Enum TypeCentrale
-    Keithley2701Ethernet
+    Keithley2701Ethernet   ' Keithley 2700/2701 — scan INIT:CONT ON + FETC?
+    DAQ6510Ethernet        ' Keithley DAQ6510   — scan ROUTe:SCAN:CREate + INIT + FETC?
     Autre
 End Enum
 
@@ -16,7 +17,8 @@ End Enum
 ' ═══════════════════════════════════════════════════════════════════════════════
 
 Public Enum TypeCarte
-    Module7706
+    Module7706   ' Keithley 7706 — 20 voies + 2 sorties analogiques ±12V
+    Module7700   ' Keithley 7700 — 20 voies, pas de sorties analogiques
     Autre
 End Enum
 
@@ -147,9 +149,17 @@ Public Class ConfigCarte
     Public ReadOnly Property LibelleType As String
         Get
             Select Case Type
-                Case TypeCarte.Module7706 : Return "Module 7706"
-                Case Else                  : Return "Autre"
+                Case TypeCarte.Module7706 : Return "Module 7706 (sorties ±Us V)"
+                Case TypeCarte.Module7700 : Return "Module 7700 (mesure seule)"
+                Case Else                 : Return "Autre"
             End Select
+        End Get
+    End Property
+
+    ''' <summary>True si cette carte dispose de sorties analogiques.</summary>
+    Public ReadOnly Property ASorties As Boolean
+        Get
+            Return Type = TypeCarte.Module7706
         End Get
     End Property
 
@@ -251,6 +261,60 @@ Public Class CommandeSCPI
             Case CategorieCommande.Scan           : Return "Scan"
             Case Else                              : Return "Autre"
         End Select
+    End Function
+
+    ''' <summary>
+    ''' Commandes SCPI par défaut pour le Keithley DAQ6510 avec carte 7700.
+    ''' Utilise ROUTe:SCAN:CREate + INIT au lieu de INIT:CONT ON.
+    ''' </summary>
+    Public Shared Function ParDefautDAQ6510() As List(Of CommandeSCPI)
+        Dim ini = CategorieCommande.Initialisation
+        Dim tc  = CategorieCommande.ConfigTC
+        Dim ten = CategorieCommande.ConfigTension
+        Dim scn = CategorieCommande.Scan
+
+        Dim lst As New List(Of CommandeSCPI)
+
+        ' ── Initialisation ──
+        lst.Add(Cmd(ini, "*RST",
+            "Réinitialisation complète du DAQ6510", False))
+        lst.Add(Cmd(ini, "DELAI_LECTURE_MS=150",
+            "Délai (ms) entre l'envoi de la commande et la lecture. " &
+            "Augmenter (ex: 300) si des ERR apparaissent. " &
+            "Format : DELAI_LECTURE_MS=valeur", True))
+
+        ' ── Configuration thermocouples ──
+        lst.Add(Cmd(tc, ":FUNCtion 'TEMPerature',(@{VOIES})",
+            "Fonction de mesure : température sur les voies TC. {VOIES} = plage ex: 101:110", False))
+        lst.Add(Cmd(tc, ":SENSe:TEMPerature:TRANsducer TCouple,(@{VOIES})",
+            "Type de transducteur : thermocouple (TCouple)", False))
+        lst.Add(Cmd(tc, ":SENSe:TEMPerature:TCouple:TYPE {TC},(@{VOIES})",
+            "Type de TC : {TC} = K, J, T, E, N, R, S ou B", False))
+        lst.Add(Cmd(tc, ":SENSe:TEMPerature:TCouple:RJUNction:RSELect INTernal,(@{VOIES})",
+            "Jonction de référence interne (INTernal) — ou EXTernal si sonde externe", True))
+        lst.Add(Cmd(tc, ":SENSe:TEMPerature:ODETector ON,(@{VOIES})",
+            "Détection fil ouvert : ON — retourne 9.9E+37 si thermocouple débranché", True))
+
+        ' ── Configuration tension DC (4-20mA via shunt) ──
+        lst.Add(Cmd(ten, ":FUNCtion 'VOLTage:DC',(@{VOIES_V})",
+            "Fonction tension continue sur les voies 4-20mA. {VOIES_V} = plage ex: 111:115", False))
+        lst.Add(Cmd(ten, ":SENSe:VOLTage:DC:RANGe:AUTO ON,(@{VOIES_V})",
+            "Calibre automatique tension DC", True))
+
+        ' ── Configuration scan ROUTe ──
+        lst.Add(Cmd(scn, ":ROUTe:SCAN:CREate (@{TOUTES_VOIES})",
+            "Créer la liste de scan. {TOUTES_VOIES} = plage complète ex: 101:115. " &
+            "Remplacé automatiquement par Thermopilot au démarrage.", False))
+        lst.Add(Cmd(scn, ":ROUTe:SCAN:COUNt:SCAN INF",
+            "Nombre de scans : infini (scan continu)", True))
+        lst.Add(Cmd(scn, ":ROUTe:SCAN:INTerval 1.0",
+            "Intervalle entre deux scans en secondes (adapté à l'intervalle Thermopilot)", True))
+        lst.Add(Cmd(scn, ":ROUTe:SCAN:RESTart ON",
+            "Redémarrer automatiquement le scan après chaque cycle", True))
+        lst.Add(Cmd(scn, ":DISPlay:SCReen SWIPE_SCAN",
+            "Afficher l'écran de suivi du scan sur le DAQ6510", True))
+
+        Return lst
     End Function
 
 End Class

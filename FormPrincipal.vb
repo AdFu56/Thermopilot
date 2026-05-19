@@ -76,10 +76,13 @@ Public Class FormPrincipal
     Private _pnlCheckRelais As New FlowLayoutPanel()   ' cases à cocher relais
     Private _btnDemarrerAcq As New Button()
     Private _btnArreterAcq  As New Button()
+    Private _btnCopieTemp   As New Button()   ' copie TEMP_ du CSV en cours
     Private _numIntervalle       As New NumericUpDown()
     Private _cmbUniteIntervalle  As New ComboBox()
     Private _numFenetre          As New NumericUpDown()  ' durée fenêtre glissante (0=tout)
     Private _cmbUniteFenetre     As New ComboBox()
+    Private _numBufferPoints     As New NumericUpDown()  ' nombre de points du buffer graphique
+    Private _lblDureeBuffer      As New Label()          ' indication durée correspondante
     Private _menuStrip           As New MenuStrip()
     Private _chkSauvegarder As New CheckBox()
     Private _chkSimulation  As New CheckBox()
@@ -154,7 +157,7 @@ Public Class FormPrincipal
     ' ─── Initialisation IHM ──────────────────────────────────────────────────
 
     Private Sub InitializeComponent()
-        Me.Text          = "Thermopilot v2.0 — Acquisition Multi-Centrale (IRDL PTR4)"
+        Me.Text          = AppInfo.TitreComplet
         Me.Size          = New Size(1400, 900)
         Me.MinimumSize   = New Size(1100, 700)
         Me.StartPosition = FormStartPosition.CenterScreen
@@ -194,7 +197,7 @@ Public Class FormPrincipal
         _lblHeure.Text     = DateTime.Now.ToString("HH:mm:ss")
         _lblHeure.BorderSides = ToolStripStatusLabelBorderSides.Left
         Dim lblVersion As New ToolStripStatusLabel() With {
-            .Text      = "Thermopilot v2.0 — Adrien Fuentes",
+            .Text      = AppInfo.TitreCourt,
             .ForeColor = Color.FromArgb(120, 130, 150),
             .Font      = New Font("Segoe UI", 7.5, FontStyle.Italic),
             .Alignment = ToolStripItemAlignment.Right,
@@ -282,9 +285,10 @@ Public Class FormPrincipal
 
         _chronogramme.Gestionnaire = _gestionnaire
 
-        _ongletSysteme.Config       = _config
-        _ongletSysteme.Gestionnaire = _gestionnaire
-        _ongletSysteme.GestCalculs  = _gestCalculs
+        _ongletSysteme.Config          = _config
+        _ongletSysteme.Gestionnaire    = _gestionnaire
+        _ongletSysteme.GestCalculs     = _gestCalculs
+        _ongletSysteme.GestionnaireVoies = _gestionnaireVoies
         AddHandler _ongletSysteme.StatutChange,        Sub(s, msg, err) AfficherStatut(msg, err)
         AddHandler _ongletSysteme.DemandeNotification, Sub(s) BtnNotification_Click(s, EventArgs.Empty)
 
@@ -364,6 +368,7 @@ Public Class FormPrincipal
                     _acquisition.Arreter()
                     _btnDemarrerAcq.Enabled = True
                     _btnArreterAcq.Enabled  = False
+                    _btnCopieTemp.Visible   = False
                     ExporterGraphiquePourRapport()
                     AfficherStatut("Chronogramme terminé — acquisition arrêtée.")
                     If _ongletRapport.AutoGenerer Then
@@ -462,11 +467,12 @@ Public Class FormPrincipal
         Dim pnl As New Panel() With {.Dock = DockStyle.Fill}
 
         ' Barre d'outils
+        ' ══ Barre 1 : contrôles principaux ══════════════════════════════════
         Dim tb As New FlowLayoutPanel() With {
             .Dock          = DockStyle.Top,
             .AutoSize      = True,
             .AutoSizeMode  = AutoSizeMode.GrowAndShrink,
-            .Padding       = New Padding(6, 6, 6, 6),
+            .Padding       = New Padding(6, 4, 6, 2),
             .WrapContents  = False
         }
         _btnDemarrerAcq.Text      = "▶ Démarrer"
@@ -485,6 +491,21 @@ Public Class FormPrincipal
         _btnArreterAcq.Height    = 28
         _btnArreterAcq.Enabled   = False
         _btnArreterAcq.Margin    = New Padding(0, 0, 6, 0)
+
+        ' Bouton copie TEMP_ — visible seulement pendant une acquisition CSV
+        _btnCopieTemp.Text      = "📋 Copie CSV temporaire"
+        _btnCopieTemp.BackColor = Color.FromArgb(60, 90, 130)
+        _btnCopieTemp.ForeColor = Color.White
+        _btnCopieTemp.FlatStyle = FlatStyle.Flat
+        _btnCopieTemp.Width     = 160
+        _btnCopieTemp.Height    = 28
+        _btnCopieTemp.Margin    = New Padding(12, 0, 0, 0)
+        _btnCopieTemp.Visible   = False
+        Dim ttCopie As New ToolTip()
+        ttCopie.SetToolTip(_btnCopieTemp,
+            "Copie le fichier CSV en cours d'acquisition vers TEMP_<nom>.csv" & vbCrLf &
+            "dans le même dossier, pour analyse dans l'onglet Résultats.")
+        AddHandler _btnCopieTemp.Click, AddressOf BtnCopieTemp_Click
 
         Dim lblInt As New Label() With {
             .Text = "Intervalle :", .AutoSize = True, .Margin = New Padding(10, 7, 2, 0)
@@ -519,11 +540,26 @@ Public Class FormPrincipal
         _chkSimulation.Text   = "Simulation"
         _chkSimulation.Margin = New Padding(12, 6, 0, 0)
 
+        tb.Controls.AddRange({
+            _btnDemarrerAcq, _btnArreterAcq, _btnCopieTemp,
+            lblInt, _numIntervalle, _cmbUniteIntervalle,
+            _chkSauvegarder, btnGoCsv, _chkSimulation
+        })
+
+        ' ══ Barre 2 : fenêtre, buffer, boutons graphique ══════════════════════
+        Dim tb2 As New FlowLayoutPanel() With {
+            .Dock          = DockStyle.Top,
+            .AutoSize      = True,
+            .AutoSizeMode  = AutoSizeMode.GrowAndShrink,
+            .Padding       = New Padding(6, 2, 6, 4),
+            .WrapContents  = False
+        }
+
         ' Fenêtre glissante
         Dim lblFen As New Label() With {
             .Text    = "Fenêtre :",
             .AutoSize = True,
-            .Margin  = New Padding(16, 7, 2, 0)
+            .Margin  = New Padding(0, 7, 2, 0)
         }
         _numFenetre.Minimum  = 0
         _numFenetre.Maximum  = 9999
@@ -534,7 +570,7 @@ Public Class FormPrincipal
         _numFenetre.Increment = 10
         _cmbUniteFenetre.DropDownStyle = ComboBoxStyle.DropDownList
         _cmbUniteFenetre.Width  = 60 : _cmbUniteFenetre.Height = 24
-        _cmbUniteFenetre.Margin = New Padding(0, 2, 4, 0)
+        _cmbUniteFenetre.Margin = New Padding(0, 2, 10, 0)
         _cmbUniteFenetre.Items.AddRange({"[s]", "[min]", "[h]"})
         _cmbUniteFenetre.SelectedIndex = 1
         Dim tt As New ToolTip()
@@ -545,13 +581,39 @@ Public Class FormPrincipal
         AddHandler _numFenetre.ValueChanged, Sub(s, e) MettreAJourFenetre()
         AddHandler _cmbUniteFenetre.SelectedIndexChanged, Sub(s, e) MettreAJourFenetre()
 
+        ' Buffer graphique
+        Dim lblBuf As New Label() With {
+            .Text      = "Buffer graphique :",
+            .AutoSize  = True,
+            .Margin    = New Padding(10, 7, 2, 0),
+            .ForeColor = Color.FromArgb(180, 195, 215)}
+        _numBufferPoints.Minimum   = 50
+        _numBufferPoints.Maximum   = 50000
+        _numBufferPoints.Value     = 800
+        _numBufferPoints.Width     = 65
+        _numBufferPoints.Height    = 24
+        _numBufferPoints.Increment = 100
+        _numBufferPoints.Margin    = New Padding(0, 2, 4, 0)
+        tt.SetToolTip(_numBufferPoints,
+            "Nombre de points conservés dans le buffer du graphique." & vbCrLf &
+            "Plus la valeur est élevée, plus la consommation mémoire est importante.")
+        tt.SetToolTip(lblBuf, "Nombre de points conservés dans le buffer du graphique.")
+        _lblDureeBuffer.AutoSize  = True
+        _lblDureeBuffer.ForeColor = Color.FromArgb(100, 200, 120)
+        _lblDureeBuffer.Font      = New Font("Segoe UI", 8.5, FontStyle.Italic)
+        _lblDureeBuffer.Text      = "≈ ?"
+        _lblDureeBuffer.Margin    = New Padding(0, 7, 14, 0)
+        AddHandler _numBufferPoints.ValueChanged,            Sub(s, e) MettreAJourBuffer()
+        AddHandler _numIntervalle.ValueChanged,              Sub(s, e) MettreAJourBuffer()
+        AddHandler _cmbUniteIntervalle.SelectedIndexChanged, Sub(s, e) MettreAJourBuffer()
+
         _btnToggleTableau.Text      = "⊞ Masquer tableau"
         _btnToggleTableau.BackColor = Color.FromArgb(55, 60, 80)
         _btnToggleTableau.ForeColor = Color.White
         _btnToggleTableau.FlatStyle = FlatStyle.Flat
         _btnToggleTableau.Width     = 140
         _btnToggleTableau.Height    = 28
-        _btnToggleTableau.Margin    = New Padding(8, 0, 0, 0)
+        _btnToggleTableau.Margin    = New Padding(0, 0, 0, 0)
         AddHandler _btnToggleTableau.Click, Sub(s, e)
             _splitDroit.Panel1Collapsed = Not _splitDroit.Panel1Collapsed
             _btnToggleTableau.Text = If(_splitDroit.Panel1Collapsed,
@@ -564,7 +626,7 @@ Public Class FormPrincipal
         _btnModeGraphique.FlatStyle = FlatStyle.Flat
         _btnModeGraphique.Width     = 115
         _btnModeGraphique.Height    = 28
-        _btnModeGraphique.Margin    = New Padding(8, 0, 0, 0)
+        _btnModeGraphique.Margin    = New Padding(6, 0, 0, 0)
         AddHandler _btnModeGraphique.Click, Sub(s, e)
             If _panelGraphique.Mode = ModeGraphique.SeriesTemporelles Then
                 _panelGraphique.Mode = ModeGraphique.Histogramme
@@ -582,7 +644,7 @@ Public Class FormPrincipal
         _btnToggleCalculs.FlatStyle = FlatStyle.Flat
         _btnToggleCalculs.Width     = 145
         _btnToggleCalculs.Height    = 28
-        _btnToggleCalculs.Margin    = New Padding(8, 0, 0, 0)
+        _btnToggleCalculs.Margin    = New Padding(6, 0, 0, 0)
         AddHandler _btnToggleCalculs.Click, Sub(s, e)
             If _splitCalculs Is Nothing Then Return
             _splitCalculs.Panel2Collapsed = Not _splitCalculs.Panel2Collapsed
@@ -590,11 +652,9 @@ Public Class FormPrincipal
                 "🧮 Afficher calculs", "🧮 Masquer calculs")
         End Sub
 
-        tb.Controls.AddRange({
-            _btnDemarrerAcq, _btnArreterAcq,
-            lblInt, _numIntervalle, _cmbUniteIntervalle,
-            _chkSauvegarder, btnGoCsv, _chkSimulation,
+        tb2.Controls.AddRange({
             lblFen, _numFenetre, _cmbUniteFenetre,
+            lblBuf, _numBufferPoints, _lblDureeBuffer,
             _btnToggleTableau, _btnToggleCalculs,
             _btnModeGraphique, ConstruireBoutonNotification()
         })
@@ -662,8 +722,9 @@ Public Class FormPrincipal
         splitMain.Panel1.Controls.Add(pnlGauche)
         splitMain.Panel2.Controls.Add(_splitDroit)
 
-        pnl.Controls.Add(splitMain)
-        pnl.Controls.Add(tb)
+        pnl.Controls.Add(splitMain)  ' Fill — en premier
+        pnl.Controls.Add(tb2)        ' Top — ligne 2 (ajouté avant tb → apparaît en dessous)
+        pnl.Controls.Add(tb)         ' Top — ligne 1 (ajouté en dernier → apparaît en haut)
         _tabAcquisition.Controls.Add(pnl)
     End Sub
 
@@ -1062,15 +1123,63 @@ Public Class FormPrincipal
         If _acquisition.Demarrer() Then
             _btnDemarrerAcq.Enabled = False
             _btnArreterAcq.Enabled  = True
+            _btnCopieTemp.Visible   = _acquisition.StockerCSV
             AfficherStatut("Acquisition en cours" &
                 If(_chkSimulation.Checked, " [SIMULATION]", ""))
         End If
+    End Sub
+
+    ''' <summary>
+    ''' Copie le fichier CSV en cours d'acquisition vers TEMP_&lt;nom&gt;.csv dans le même dossier.
+    ''' Utilise File.Copy (plus fiable que robocopy sur fichier ouvert avec Flush).
+    ''' </summary>
+    Private Sub BtnCopieTemp_Click(sender As Object, e As EventArgs)
+        If Not _acquisition.EnCours OrElse Not _acquisition.StockerCSV Then
+            AfficherStatut("Aucune acquisition CSV en cours.", True)
+            Return
+        End If
+        Dim cheminSrc = _acquisition.CheminCSV
+        If String.IsNullOrEmpty(cheminSrc) OrElse Not IO.File.Exists(cheminSrc) Then
+            AfficherStatut("Fichier CSV introuvable : " & cheminSrc, True)
+            Return
+        End If
+        Try
+            Dim dossier  = IO.Path.GetDirectoryName(cheminSrc)
+            Dim nomFich  = IO.Path.GetFileName(cheminSrc)
+            Dim cheminDst = IO.Path.Combine(dossier, "TEMP_" & nomFich)
+            ' Flush du buffer CSV avant copie
+            _acquisition.FlushCSV()
+            ' Copie via robocopy /B pour ignorer le verrou d'écriture
+            Dim psi As New Diagnostics.ProcessStartInfo("robocopy") With {
+                .Arguments      = String.Format("""{0}"" ""{1}"" ""{2}"" /B /NP /NJH /NJS",
+                                     dossier, dossier, nomFich),
+                .UseShellExecute        = False,
+                .CreateNoWindow         = True,
+                .RedirectStandardOutput = True
+            }
+            ' Renommer en TEMP_ après copie (robocopy ne change pas le nom)
+            ' On utilise plutôt File.Copy avec overwrite, le flush garantit la cohérence
+            IO.File.Copy(cheminSrc, cheminDst, overwrite:=True)
+            AfficherStatut("Copie TEMP créée : " & IO.Path.GetFileName(cheminDst))
+            ' Proposer d'ouvrir dans l'onglet Résultats
+            Dim rep = MessageBox.Show(
+                "Copie créée :" & vbCrLf & cheminDst & vbCrLf & vbCrLf &
+                "Ouvrir dans l'onglet Résultats ?",
+                "Copie TEMP", MessageBoxButtons.YesNo, MessageBoxIcon.Information)
+            If rep = DialogResult.Yes Then
+                _tabControl.SelectedTab = _tabResultats
+                _ongletVisuCSV.OuvrirFichier(cheminDst)
+            End If
+        Catch ex As Exception
+            AfficherStatut("Erreur copie TEMP : " & ex.Message, True)
+        End Try
     End Sub
 
     Private Sub BtnArreterAcq_Click(sender As Object, e As EventArgs)
         _acquisition.Arreter()
         _btnDemarrerAcq.Enabled = True
         _btnArreterAcq.Enabled  = False
+        _btnCopieTemp.Visible   = False
         AfficherStatut("Acquisition arrêtée")
         ExporterGraphiquePourRapport()
         ' Générer le rapport automatiquement si la case est cochée
@@ -1924,6 +2033,7 @@ Public Class FormPrincipal
             _acqDemarreeParChrono   = False
             _btnDemarrerAcq.Enabled = True
             _btnArreterAcq.Enabled  = False
+            _btnCopieTemp.Visible   = False
             AfficherStatut("Chronogramme et acquisition arrêtés")
         Else
             AfficherStatut("Chronogramme arrêté")
@@ -2057,7 +2167,7 @@ Public Class FormPrincipal
         End Try
     End Sub
 
-    Private Const TITRE_BASE As String = "Thermopilot v2.0 — Acquisition Multi-Centrale (IRDL PTR4)"
+    Private ReadOnly TITRE_BASE As String = AppInfo.TitreComplet
 
     Private Sub MettreAJourTitre()
         Dim nomFichier = IO.Path.GetFileName(ConfigManager.CheminFichier)
@@ -2075,6 +2185,27 @@ Public Class FormPrincipal
             End Try
         End If
         _panelGraphique.FenetreSecondes = fen
+    End Sub
+
+    Private Sub MettreAJourBuffer()
+        ' Mettre à jour MaxPoints dans l'historique
+        Dim nb = CInt(_numBufferPoints.Value)
+        _historique.MaxPoints = nb
+
+        ' Calculer la durée correspondante
+        Try
+            Dim intervSec As Double = ParseurDuree.EnSecondes(
+                CInt(_numIntervalle.Value).ToString() &
+                ParseurDuree.SuffixeParIndex(_cmbUniteIntervalle.SelectedIndex))
+            If intervSec > 0 Then
+                Dim dureeSec = nb * intervSec
+                _lblDureeBuffer.Text = "≈ " & ParseurDuree.FormatAuto(dureeSec)
+            Else
+                _lblDureeBuffer.Text = "≈ ?"
+            End If
+        Catch
+            _lblDureeBuffer.Text = "≈ ?"
+        End Try
     End Sub
 
     Private Sub SauvegarderConfig()
@@ -2244,6 +2375,8 @@ Public Class FormPrincipal
 
     Protected Overrides Sub OnLoad(e As EventArgs)
         MyBase.OnLoad(e)
+        ' Initialiser l'indication durée buffer graphique
+        MettreAJourBuffer()
         ' 1. Charger la bibliothèque de périphériques (avant les onglets Centrale)
         _ongletPeripheriques.ChargerDepuisConfig()
 

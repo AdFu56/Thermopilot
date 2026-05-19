@@ -122,6 +122,16 @@ Public Class MoteurAcquisition
         FermerCSV()
     End Sub
 
+    ''' <summary>Force l'écriture immédiate du buffer CSV sur disque (avant une copie TEMP_).</summary>
+    Public Sub FlushCSV()
+        Try
+            SyncLock _lockCSV
+                If _writerCSV IsNot Nothing Then _writerCSV.Flush()
+            End SyncLock
+        Catch
+        End Try
+    End Sub
+
     ' ─── Réception depuis les centrales réelles ───────────────────────────────
 
     Private Sub Centrale_NouvellesMesures(centrale As CentraleKeithley, horodatage As DateTime)
@@ -301,6 +311,14 @@ End Class
 Public Class HistoriqueMultiCentrale
 
     Private _lock      As New Object()
+    Public Property MaxPoints As Integer
+        Get
+            Return _maxPoints
+        End Get
+        Set(value As Integer)
+            _maxPoints = Math.Max(50, value)   ' minimum 50 points
+        End Set
+    End Property
     Private _maxPoints As Integer
     Private _donnees   As New Dictionary(Of String, Queue(Of PointMesure))
     Private _horodatages As New Queue(Of DateTime)

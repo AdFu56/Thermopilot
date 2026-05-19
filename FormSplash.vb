@@ -27,7 +27,11 @@ Public Class FormSplash
 
     Private Const TITRE       As String = "Thermopilot"
     Private Const SOUS_TITRE  As String = "Acquisition multi-centrale & Pilotage"
-    Private Const VERSION     As String = "v2.0"
+    Private ReadOnly Property VERSION As String
+        Get
+            Return AppInfo.VERSION
+        End Get
+    End Property
     Private Const NOM_LABO    As String = "IRDL PTR4"
     Private Const NOM_AUTEUR  As String = "Adrien Fuentes"
     Private Const CHEMIN_LOGO As String = ""   ' ex : "C:\MonLabo\logo.png"

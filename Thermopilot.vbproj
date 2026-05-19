@@ -59,6 +59,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AppInfo.vb" />
     <Compile Include="Program.vb" />
     <Compile Include="FormSplash.vb">
       <SubType>Form</SubType>

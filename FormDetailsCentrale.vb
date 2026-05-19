@@ -24,9 +24,13 @@ Public Class FormDetailsCentrale
     Public Sub New(typeCentrale As TypeCentrale,
                    Optional commandesPersonnalisees As List(Of CommandeSCPI) = Nothing)
         _typeCentrale = typeCentrale
+        ' Sélectionner les commandes par défaut selon le type de centrale
+        Dim commandesDefaut = If(typeCentrale = TypeCentrale.DAQ6510Ethernet,
+                                 CommandeSCPI.ParDefautDAQ6510(),
+                                 CommandeSCPI.ParDefaut())
         _commandes = If(commandesPersonnalisees IsNot Nothing,
                         commandesPersonnalisees,
-                        CommandeSCPI.ParDefaut)
+                        commandesDefaut)
 
         Me.Text            = "Détails — " & LibelleCentrale(typeCentrale)
         Me.Size            = New Size(860, 620)
@@ -195,7 +199,9 @@ Public Class FormDetailsCentrale
             "Valeurs par défaut",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question)
         If rep = DialogResult.Yes Then
-            _commandes = CommandeSCPI.ParDefaut
+            _commandes = If(_typeCentrale = TypeCentrale.DAQ6510Ethernet,
+                            CommandeSCPI.ParDefautDAQ6510(),
+                            CommandeSCPI.ParDefaut())
             RemplirGrille()
         End If
     End Sub
@@ -205,6 +211,7 @@ Public Class FormDetailsCentrale
     Public Shared Function LibelleCentrale(t As TypeCentrale) As String
         Select Case t
             Case TypeCentrale.Keithley2701Ethernet : Return "Keithley 2701 Ethernet"
+            Case TypeCentrale.DAQ6510Ethernet      : Return "Keithley DAQ6510 Ethernet"
             Case Else                               : Return "Autre"
         End Select
     End Function

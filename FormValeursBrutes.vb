@@ -24,6 +24,7 @@ Public Class FormValeursBrutes
 
     Private _dgv            As New DataGridView()
     Private _btnRafraichir  As New Button()
+    Private _btnDiagRaw     As New Button()  ' diagnostic réponse brute DAQ6510
     Private _btnFermer      As New Button()
     Private _chkAuto        As New CheckBox()
     Private _numIntervalle  As New NumericUpDown()
@@ -71,6 +72,15 @@ Public Class FormValeursBrutes
         _btnRafraichir.Height    = 28
         _btnRafraichir.AutoSize  = True
 
+        ' Bouton diagnostic RAW — visible seulement sur DAQ6510
+        _btnDiagRaw.Text      = "🔬 RAW"
+        _btnDiagRaw.BackColor = Color.FromArgb(100, 60, 10)
+        _btnDiagRaw.ForeColor = Color.White
+        _btnDiagRaw.FlatStyle = FlatStyle.Flat
+        _btnDiagRaw.Height    = 28
+        _btnDiagRaw.AutoSize  = True
+        _btnDiagRaw.Visible   = _centrale IsNot Nothing AndAlso _centrale.EstDAQ6510
+
         _chkAuto.Text      = "Auto :"
         _chkAuto.ForeColor = Color.FromArgb(180, 190, 210)
         _chkAuto.AutoSize  = True
@@ -98,7 +108,7 @@ Public Class FormValeursBrutes
         _btnFermer.AutoSize  = True
         _btnFermer.Margin    = New Padding(8, 0, 0, 0)
 
-        pnlTop.Controls.AddRange({_btnRafraichir, _chkAuto, _numIntervalle, lblSec, _btnFermer})
+        pnlTop.Controls.AddRange({_btnRafraichir, _chkAuto, _numIntervalle, lblSec, _btnDiagRaw, _btnFermer})
 
         ' ── Grille ──
         _dgv.Dock                  = DockStyle.Fill
@@ -160,6 +170,7 @@ Public Class FormValeursBrutes
         _timer.Interval = 5000
         AddHandler _timer.Tick,            Sub(s, e) Rafraichir()
         AddHandler _btnRafraichir.Click,   Sub(s, e) Rafraichir()
+        AddHandler _btnDiagRaw.Click,      Sub(s, e) DiagnosticRaw()
         AddHandler _btnFermer.Click,       Sub(s, e) Me.Close()
         AddHandler _chkAuto.CheckedChanged, AddressOf ChkAuto_Changed
         AddHandler _numIntervalle.ValueChanged, Sub(s, e)
@@ -334,6 +345,59 @@ Public Class FormValeursBrutes
         Else
             _timer.Stop()
         End If
+    End Sub
+
+    ''' <summary>
+    ''' Envoie :FETCh? directement et affiche la réponse brute dans une boîte de dialogue.
+    ''' Permet de diagnostiquer le format exact retourné par le DAQ6510.
+    ''' </summary>
+    Private Sub DiagnosticRaw()
+        If Not _centrale.EstConnectee Then
+            MessageBox.Show("Centrale non connectée.", "Diagnostic RAW", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
+        _lblStatut.Text = "Diagnostic RAW en cours..."
+        Task.Run(Sub()
+            Try
+                Dim voiesActives = _centrale.Voies.Voies.Where(Function(v) v.Active).
+                                   OrderBy(Function(v) v.Numero).ToList()
+                Dim infoVoies = String.Join(Environment.NewLine,
+                    voiesActives.Select(Function(v)
+                        Return String.Format("  V{0} - {1} - Type={2}",
+                            v.Numero, v.Nom, v.Type.ToString())
+                    End Function))
+
+                ' Vider les erreurs residuelles (ignoré si non supporté)
+                _centrale.Keithley.Query(":SYSTem:ERRor?")
+
+                ' Tester ROUTe:CLOSe + READ? sur chaque voie active
+                Dim resultats As New System.Text.StringBuilder()
+                For Each v In voiesActives
+                    _centrale.Keithley.SendCommand(String.Format(":ROUTe:CLOSe (@{0})", v.Numero))
+                    System.Threading.Thread.Sleep(50)
+                    Dim rep = _centrale.Keithley.Query(":READ?")
+                    resultats.AppendLine(String.Format("  V{0}: {1}", v.Numero,
+                        If(rep = "", "(timeout)", rep)))
+                Next
+
+                Me.BeginInvoke(Sub()
+                    Dim msg =
+                        "=== Voies actives ===" & Environment.NewLine &
+                        If(infoVoies = "", "(aucune)", infoVoies) & Environment.NewLine & Environment.NewLine &
+                        "=== ROUTe:CLOSe + READ? ===" & Environment.NewLine &
+                        resultats.ToString()
+                    MessageBox.Show(msg, "Diagnostic RAW - DAQ6510",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information)
+                    _lblStatut.Text = "Diagnostic termine."
+                End Sub)
+            Catch ex As Exception
+                Me.BeginInvoke(Sub()
+                    MessageBox.Show("Erreur : " & ex.Message, "Diagnostic RAW",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    _lblStatut.Text = ""
+                End Sub)
+            End Try
+        End Sub)
     End Sub
 
 End Class

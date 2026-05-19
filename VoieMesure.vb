@@ -92,9 +92,9 @@ End Class
 Public Class SortieAnalogique
 
     Public Enum ModePilotage
-        Booleen        ' 0V ou +Us — checkbox dans chronogramme
-        Analogique     ' 0..+Us V — valeur numérique par étape
-        AnalogiqueFull ' −Us..+Us V — actionneur bidirectionnel (V3V, etc.)
+        Booleen     ' 0V ou +Amplitude — checkbox dans chronogramme
+        Analogique  ' 0..+Amplitude V — valeur numérique par étape
+        AnalogiqueFull  ' −Amplitude..+Amplitude V — actionneur bidirectionnel (V3V, etc.)
     End Enum
 
     Public Property Numero       As Integer       ' 123, 124, 223, 224
@@ -102,10 +102,10 @@ Public Class SortieAnalogique
     Public Property Active       As Boolean = False
     Public Property Mode         As ModePilotage = ModePilotage.Booleen
     ''' <summary>
-    ''' Us : tension maximale (V).
-    ''' Booléen/Analogique : sortie de 0 à +Us.
-    ''' Analogique [-Us;Us] : sortie de −Us à +Us.
-    ''' Plage physique module 7706 : 0..12 V (Booléen/Analogique) ou ±12 V (Analogique [-Us;Us]).
+    ''' Amplitude maximale de tension (V).
+    ''' Booléen/Analogique : sortie de 0 à +Amplitude.
+    ''' AnalogiqueFull : sortie de −Amplitude à +Amplitude.
+    ''' Plage physique module 7706 : 0..12 V (Booléen/Analogique) ou ±12 V (AnalogiqueFull).
     ''' </summary>
     Public Property Amplitude    As Double = 5.0
     Public Property SeuilOnV     As Double = 2.5  ' Seuil ON pour mode Booléen (et graphique)
@@ -134,11 +134,7 @@ Public Class SortieAnalogique
 
     Public ReadOnly Property ValeurGraphiqueB As Double
         Get
-            If Mode = ModePilotage.Analogique OrElse Mode = ModePilotage.AnalogiqueFull Then
-                Return TensionV
-            Else
-                Return If(EstOn, 1.0, 0.0)
-            End If
+            Return If(EstOn, 1.0, 0.0)
         End Get
     End Property
 
@@ -167,9 +163,9 @@ Public Class SortieAnalogique
     Public ReadOnly Property LibelleMode As String
         Get
             Select Case Mode
-                Case ModePilotage.Booleen       : Return "Booléen (0/+Us)"
-                Case ModePilotage.Analogique    : Return "Analogique [0;Us]"
-                Case ModePilotage.AnalogiqueFull: Return "Analogique [-Us;Us]"
+                Case ModePilotage.Booleen    : Return "Booléen (0/+Amp)"
+                Case ModePilotage.Analogique : Return "Analogique (0..+Amp)"
+                Case ModePilotage.AnalogiqueFull        : Return "Analogique full (−Amp..+Amp)"
                 Case Else                    : Return "?"
             End Select
         End Get
@@ -460,14 +456,70 @@ Public Class GestionVoies
     Public Sub ParseReponse(reponse As String, horodatage As DateTime)
         If String.IsNullOrWhiteSpace(reponse) Then Return
         Dim tokens() = reponse.Split(","c)
-        Dim actives  = Voies.Where(Function(v) v.Active).ToList()
 
-        For i As Integer = 0 To Math.Min(tokens.Length - 1, actives.Count - 1)
-            Dim v           = actives(i)
+        ' L'ordre des tokens correspond à l'ordre du scan :
+        ' TC actifs en premier (ordre numérique), puis Débit actifs (ordre numérique).
+        ' On reconstitue cet ordre pour aligner correctement les tokens.
+        Dim ordreScan As New List(Of VoieMesure)
+        For Each v In Voies.Where(Function(x) x.Active AndAlso
+                                   x.Type = VoieMesure.TypeVoie.Temperature).
+                          OrderBy(Function(x) x.Numero)
+            ordreScan.Add(v)
+        Next
+        For Each v In Voies.Where(Function(x) x.Active AndAlso
+                                   x.Type = VoieMesure.TypeVoie.Debit).
+                          OrderBy(Function(x) x.Numero)
+            ordreScan.Add(v)
+        Next
+
+        For i As Integer = 0 To Math.Min(tokens.Length - 1, ordreScan.Count - 1)
+            Dim v           = ordreScan(i)
             Dim etaitAlarme = v.EnAlarme
             v.Horodatage = horodatage
             Try
                 Dim val As Double = Double.Parse(tokens(i).Trim(),
+                    System.Globalization.CultureInfo.InvariantCulture)
+                If Math.Abs(val) > 9.0E+30 Then
+                    v.EnErreur    = True
+                    v.ValeurBrute = Double.NaN
+                Else
+                    v.EnErreur    = False
+                    v.ValeurBrute = val
+                End If
+                v.CalculerValeur()
+            Catch
+                v.EnErreur    = True
+                v.ValeurBrute = Double.NaN
+                v.Valeur      = Double.NaN
+            End Try
+            If v.EnAlarme <> etaitAlarme Then
+                RaiseEvent AlarmeChangee(Me, v, v.EnAlarme)
+            End If
+        Next
+    End Sub
+
+    ''' <summary>
+    ''' Variante pour le DAQ6510 qui scanne une plage min:max contiguë.
+    ''' Les tokens sont indexés par position dans la plage (vMin, vMin+1, …, vMax).
+    ''' Seules les voies actives dont le numéro est dans la plage sont mises à jour.
+    ''' </summary>
+    Public Sub ParseReponseAvecPlage(reponse As String, horodatage As DateTime,
+                                      vMin As Integer, vMax As Integer)
+        If String.IsNullOrWhiteSpace(reponse) Then Return
+        Dim tokens() = reponse.Split(","c)
+        Dim nbAttendu = vMax - vMin + 1
+        If tokens.Length < nbAttendu Then
+            ' Moins de valeurs qu'attendu — fallback sur ParseReponse séquentielle
+            ParseReponse(reponse, horodatage)
+            Return
+        End If
+        For Each v In Voies.Where(Function(x) x.Active AndAlso x.Numero >= vMin AndAlso x.Numero <= vMax)
+            Dim idx = v.Numero - vMin   ' index dans le buffer
+            If idx >= tokens.Length Then Continue For
+            Dim etaitAlarme = v.EnAlarme
+            v.Horodatage = horodatage
+            Try
+                Dim val As Double = Double.Parse(tokens(idx).Trim(),
                     System.Globalization.CultureInfo.InvariantCulture)
                 If Math.Abs(val) > 9.0E+30 Then
                     v.EnErreur    = True

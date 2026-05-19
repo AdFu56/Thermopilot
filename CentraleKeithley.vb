@@ -24,6 +24,16 @@ Public Class CentraleKeithley
     ''' <summary>Numéro de la centrale (1, 2, 3…).</summary>
     Public Property Numero As Integer
 
+    ''' <summary>Type de centrale (2701, DAQ6510…) — détermine le protocole SCPI.</summary>
+    Public Property TypeCentrale As TypeCentrale = TypeCentrale.Keithley2701Ethernet
+
+    ''' <summary>True si cette centrale est un DAQ6510.</summary>
+    Public ReadOnly Property EstDAQ6510 As Boolean
+        Get
+            Return TypeCentrale = TypeCentrale.DAQ6510Ethernet
+        End Get
+    End Property
+
     ''' <summary>Nom libre affiché dans les onglets et le CSV.</summary>
     Public Property Nom As String
         Get
@@ -153,7 +163,7 @@ Public Class CentraleKeithley
         Try
             ' Si déjà en acquisition continue, FETC? suffit
             If EnAcquisition Then
-                Dim rep = _keithley.LireScan()
+                Dim rep = If(EstDAQ6510, _keithley.LireScanDAQ6510(), _keithley.LireScan())
                 If Not String.IsNullOrWhiteSpace(rep) Then
                     _voies.ParseReponse(rep, DateTime.Now)
                     Return True
@@ -161,24 +171,24 @@ Public Class CentraleKeithley
                 Return False
             End If
 
-            ' Pas en acquisition : reconfigurer le scan si pas encore fait,
-            ' puis lire le buffer
+            ' Pas en acquisition : configurer le scan si pas encore fait
             If Not _scanConfigure Then
                 Dim voiesT As New List(Of String)
                 Dim voiesD As New List(Of String)
                 Dim typeTC = "K"
-                For Each v In _voies.VoiesTemperature()
+                For Each v In _voies.VoiesTemperature().Where(Function(x) x.Active)
                     voiesT.Add(v.Numero.ToString())
                 Next
-                For Each v In _voies.VoiesDebit()
+                For Each v In _voies.VoiesDebit().Where(Function(x) x.Active)
                     voiesD.Add(v.Numero.ToString())
                 Next
                 If voiesT.Count = 0 AndAlso voiesD.Count = 0 Then Return False
                 AppliquerConfigScan(voiesT, voiesD, typeTC)
+                ' DAQ6510 : MEASure? est synchrone, pas d'attente nécessaire
             End If
 
-            ' 2. Lire le buffer maintenant rempli
-            Dim reponse = _keithley.LireScan()
+            ' Lire le buffer
+            Dim reponse = If(EstDAQ6510, _keithley.LireScanDAQ6510(), _keithley.LireScan())
             If Not String.IsNullOrWhiteSpace(reponse) Then
                 _voies.ParseReponse(reponse, DateTime.Now)
                 DerniereScan = DateTime.Now
@@ -195,7 +205,7 @@ Public Class CentraleKeithley
             sw.Restart()
             Try
                 Dim t   = DateTime.Now
-                Dim rep = _keithley.LireScan()
+                Dim rep = If(EstDAQ6510, _keithley.LireScanDAQ6510(), _keithley.LireScan())
                 If Not String.IsNullOrWhiteSpace(rep) Then
                     _voies.ParseReponse(rep, t)
                     DerniereScan = t
@@ -216,10 +226,20 @@ Public Class CentraleKeithley
 
     Public Sub AppliquerConfigScan(voiesTemp As List(Of String), voiesDebit As List(Of String), typeTC As String)
         If Not EstConnectee Then Return
-        _keithley.ConfigurerScan(
-            String.Join(",", voiesTemp),
-            String.Join(",", voiesDebit),
-            typeTC)
+        If EstDAQ6510 Then
+            ' DAQ6510 : ROUTe:CLOSe + READ? voie par voie
+            Dim intervalleSec = IntervalleMsec / 1000.0
+            _keithley.ConfigurerScanDAQ6510(
+                String.Join(",", voiesTemp),
+                String.Join(",", voiesDebit),
+                typeTC, intervalleSec)
+        Else
+            ' Keithley 2700/2701 : INIT:CONT ON + FETC?
+            _keithley.ConfigurerScan(
+                String.Join(",", voiesTemp),
+                String.Join(",", voiesDebit),
+                typeTC)
+        End If
         _scanConfigure = True
     End Sub
 
@@ -228,10 +248,10 @@ Public Class CentraleKeithley
         If Not EstConnectee Then Return
         Dim voiesT As New List(Of String)
         Dim voiesD As New List(Of String)
-        For Each v In _voies.VoiesTemperature()
+        For Each v In _voies.VoiesTemperature().Where(Function(x) x.Active)
             voiesT.Add(v.Numero.ToString())
         Next
-        For Each v In _voies.VoiesDebit()
+        For Each v In _voies.VoiesDebit().Where(Function(x) x.Active)
             voiesD.Add(v.Numero.ToString())
         Next
         _keithley.ConfigurerScan(String.Join(",", voiesT), String.Join(",", voiesD), typeTC)
@@ -246,17 +266,21 @@ Public Class CentraleKeithley
     End Property
 
     Public Sub SauverConnexionDansConfig(cfg As ConfigManager)
-        cfg.Set_(SectionIni, "Nom",       NomAffiche)
-        cfg.Set_(SectionIni, "IPAddress", IPAddress)
-        cfg.Set_(SectionIni, "Port",      Port)
-        cfg.Set_(SectionIni, "Timeout",   TimeoutMs)
+        cfg.Set_(SectionIni, "Nom",           NomAffiche)
+        cfg.Set_(SectionIni, "IPAddress",     IPAddress)
+        cfg.Set_(SectionIni, "Port",          Port)
+        cfg.Set_(SectionIni, "Timeout",       TimeoutMs)
+        cfg.Set_(SectionIni, "TypeCentrale",  CInt(TypeCentrale))
     End Sub
 
     Public Sub ChargerConnexionDepuisConfig(cfg As ConfigManager)
-        Nom       = cfg.Get_(SectionIni, "Nom",       "Centrale " & Numero.ToString())
-        IPAddress = cfg.Get_(SectionIni, "IPAddress", "192.168.0." & (Numero + 2).ToString())
-        Port      = cfg.GetInt(SectionIni, "Port",    1394)
-        TimeoutMs = cfg.GetInt(SectionIni, "Timeout", 3000)
+        Nom           = cfg.Get_(SectionIni, "Nom",       "Centrale " & Numero.ToString())
+        IPAddress     = cfg.Get_(SectionIni, "IPAddress", "192.168.0." & (Numero + 2).ToString())
+        TypeCentrale  = CType(cfg.GetInt(SectionIni, "TypeCentrale", CInt(TypeCentrale.Keithley2701Ethernet)), TypeCentrale)
+        ' Port par défaut selon le type : 5025 pour DAQ6510, 1394 pour 2701
+        Dim portDefaut = If(EstDAQ6510, 5025, 1394)
+        Port          = cfg.GetInt(SectionIni, "Port",    portDefaut)
+        TimeoutMs     = cfg.GetInt(SectionIni, "Timeout", 3000)
     End Sub
 
 End Class
@@ -429,9 +453,7 @@ Public Class GestionnaireMultiCentrale
                 cols.Add(String.Format("{0}_{1} ({2})", c.NomAffiche, v.Nom, v.Unite))
             Next
             For Each s In c.Voies.SortiesActives()
-                Dim unite = If(s.Mode = SortieAnalogique.ModePilotage.Analogique OrElse
-                               s.Mode = SortieAnalogique.ModePilotage.AnalogiqueFull, "V", "ON/OFF")
-                cols.Add(String.Format("{0}_{1} ({2})", c.NomAffiche, s.Nom, unite))
+                cols.Add(String.Format("{0}_{1} (ON/OFF)", c.NomAffiche, s.Nom))
             Next
         Next
         ' Voies calculées
@@ -470,13 +492,7 @@ Public Class GestionnaireMultiCentrale
                 End If
             Next
             For Each s In c.Voies.SortiesActives()
-                If s.Mode = SortieAnalogique.ModePilotage.Analogique OrElse
-                   s.Mode = SortieAnalogique.ModePilotage.AnalogiqueFull Then
-                    cols.Add(s.TensionV.ToString(fmt,
-                        System.Globalization.CultureInfo.InvariantCulture))
-                Else
-                    cols.Add(If(s.EstOn, "1", "0"))
-                End If
+                cols.Add(If(s.EstOn, "1", "0"))
             Next
         Next
         ' Voies calculées

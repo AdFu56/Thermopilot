@@ -66,6 +66,20 @@ Public Class OngletVisuCSV
 
     ' ─── Persistance ─────────────────────────────────────────────────────────
 
+    ''' <summary>
+    ''' Ouvre un fichier CSV dans l'onglet Résultats courant.
+    ''' Appelé depuis FormPrincipal après une copie TEMP_.
+    ''' </summary>
+    Public Sub OuvrirFichier(chemin As String)
+        If String.IsNullOrEmpty(chemin) OrElse Not IO.File.Exists(chemin) Then Return
+        Dim idx = _tabResultats.SelectedIndex
+        If idx >= 0 AndAlso idx < _panneaux.Count Then
+            _panneaux(idx).ChargerFichier(chemin)
+        ElseIf _panneaux.Count > 0 Then
+            _panneaux(0).ChargerFichier(chemin)
+        End If
+    End Sub
+
     Public Sub SauverEtat()
         If Config Is Nothing Then Return
         Dim nb = _tabResultats.TabPages.Count
@@ -740,10 +754,21 @@ Public Class PanneauVisuCSV
                 Dim cellules = l.Split(_separateur)
                 _lignes.Add(cellules)
                 Dim dt As DateTime
-                Dim ok = DateTime.TryParse(cellules(0).Trim(),
+                Dim raw = cellules(0).Trim()
+                ' Essayer d'abord le format exact Thermopilot "yyyy-MM-dd HH:mm:ss"
+                ' puis les variantes courantes, puis le TryParse générique en dernier recours
+                Dim ok = DateTime.TryParseExact(raw, "yyyy-MM-dd HH:mm:ss",
                     System.Globalization.CultureInfo.InvariantCulture,
                     Globalization.DateTimeStyles.None, dt)
-                If Not ok Then ok = DateTime.TryParse(cellules(0).Trim(), dt)
+                If Not ok Then ok = DateTime.TryParseExact(raw, "yyyy-MM-dd HH:mm",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    Globalization.DateTimeStyles.None, dt)
+                If Not ok Then ok = DateTime.TryParseExact(raw, "dd/MM/yyyy HH:mm:ss",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    Globalization.DateTimeStyles.None, dt)
+                If Not ok Then ok = DateTime.TryParse(raw,
+                    System.Globalization.CultureInfo.CurrentCulture,
+                    Globalization.DateTimeStyles.None, dt)
                 _horodatages.Add(If(ok, dt, DateTime.MinValue))
             Next
 
@@ -751,11 +776,12 @@ Public Class PanneauVisuCSV
                 RaiseEvent StatutChange(Me, "Aucune donnée dans le fichier.", True) : Return
             End If
 
-            ' Tableau (limité à 2000 lignes)
+            ' Tableau — limité à 50 000 lignes pour garder une interface réactive
+            Dim MAX_TABLEAU = 50000
             For Each col In _colonnes
                 _dgvDonnees.Columns.Add(col.Replace(" ", "_"), col)
             Next
-            Dim maxR = Math.Min(_lignes.Count, 2000)
+            Dim maxR = Math.Min(_lignes.Count, MAX_TABLEAU)
             For r As Integer = 0 To maxR - 1
                 Dim lig = _lignes(r)
                 Dim idx = _dgvDonnees.Rows.Add()
@@ -782,8 +808,10 @@ Public Class PanneauVisuCSV
                _horodatages.Last() <> DateTime.MinValue Then
                 duree = (_horodatages.Last() - _horodatages.First()).TotalMinutes.ToString("F0") & " min"
             End If
-            _lblInfo.Text = String.Format("{0} mesures · {1} voies · {2}",
-                _lignes.Count, _colonnes.Count - 1, duree)
+            Dim tronque = If(_lignes.Count > 50000,
+                String.Format(" ⚠ tableau tronqué à 50 000/{0} lignes", _lignes.Count), "")
+            _lblInfo.Text = String.Format("{0} mesures · {1} voies · {2}{3}",
+                _lignes.Count, _colonnes.Count - 1, duree, tronque)
 
             AfficherStats()
             ConstruireHistoriqueEtGraphique()

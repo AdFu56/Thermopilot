@@ -261,11 +261,21 @@ Public Class OngletConnexion
         ctrl.BtnVerifier.Enabled   = False
 
         ' Type de centrale
-        ctrl.CmbType.Items.AddRange({"Keithley 2701 Ethernet", "Autre"})
+        ctrl.CmbType.Items.AddRange({"Keithley 2701 Ethernet", "Keithley DAQ6510 Ethernet", "Autre"})
         ctrl.CmbType.SelectedIndex = 0
         ctrl.CmbType.DropDownStyle = ComboBoxStyle.DropDownList
         ctrl.CmbType.Width         = 180
         ctrl.CmbType.Font          = New Font("Segoe UI", 9)
+        ' Ajuster le port par défaut selon le type sélectionné
+        AddHandler ctrl.CmbType.SelectedIndexChanged,
+            Sub(s, e)
+                Select Case ctrl.CmbType.SelectedIndex
+                    Case 0 ' Keithley 2701
+                        If ctrl.NumPort.Value = 5025 Then ctrl.NumPort.Value = 1394
+                    Case 1 ' DAQ6510
+                        If ctrl.NumPort.Value = 1394 Then ctrl.NumPort.Value = 5025
+                End Select
+            End Sub
 
         ' Bouton Détails (visible après Appliquer)
         ctrl.BtnDetails.Text      = "📋 Détails"
@@ -388,6 +398,12 @@ Public Class OngletConnexion
             ctrl.TxtIP.Text      = c.IPAddress
             ctrl.NumPort.Value   = c.Port
             ctrl.NumTimeout.Value = c.TimeoutMs
+            ' Restaurer le type de centrale dans la ComboBox
+            Select Case c.TypeCentrale
+                Case TypeCentrale.Keithley2701Ethernet : ctrl.CmbType.SelectedIndex = 0
+                Case TypeCentrale.DAQ6510Ethernet      : ctrl.CmbType.SelectedIndex = 1
+                Case Else                              : ctrl.CmbType.SelectedIndex = 2
+            End Select
         Next
     End Sub
 
@@ -445,13 +461,13 @@ Public Class OngletConnexion
         If Not _controlesCentrale.ContainsKey(numero) Then Return
         Dim ctrl = _controlesCentrale(numero)
 
-        ' Déterminer le type de centrale sélectionné — déclaration explicite requise pour l'enum
+        ' Déterminer le type de centrale sélectionné
         Dim typeCentrale As TypeCentrale
-        If ctrl.CmbType.SelectedIndex = 0 Then
-            typeCentrale = TypeCentrale.Keithley2701Ethernet
-        Else
-            typeCentrale = TypeCentrale.Autre
-        End If
+        Select Case ctrl.CmbType.SelectedIndex
+            Case 0 : typeCentrale = TypeCentrale.Keithley2701Ethernet
+            Case 1 : typeCentrale = TypeCentrale.DAQ6510Ethernet
+            Case Else : typeCentrale = TypeCentrale.Autre
+        End Select
 
         ' Chercher le formulaire parent pour ShowDialog (OngletConnexion n'est pas un Control)
         Dim parentForm As Form = Nothing
@@ -547,6 +563,8 @@ Public Class OngletConnexion
             ' TEST 1 : *IDN?
             EcrireRapport("TEST 1/3 — *IDN?", RapportStyle.Section)
             AvancerBarre(5)
+            ' DAQ6510 sur port 5025 peut nécessiter un délai plus long
+            If c.EstDAQ6510 Then c.Keithley.DelaiLectureMs = Math.Max(c.Keithley.DelaiLectureMs, 200)
             Dim idn = c.Keithley.Query("*IDN?")
             AvancerBarre(30)
             If idn = "" Then
@@ -555,30 +573,84 @@ Public Class OngletConnexion
             End If
             EcrireRapport("  ✔  " & idn, RapportStyle.Data)
 
-            ' TEST 2 : *TST?
-            EcrireRapport("TEST 2/3 — *TST?", RapportStyle.Section)
-            AvancerBarre(35)
-            Dim tst = c.Keithley.Query("*TST?")
-            AvancerBarre(70)
-            If tst.Trim() = "0" Then
-                EcrireRapport("  ✔  Self-test OK.", RapportStyle.OK)
+            ' TEST 2 : *TST? — ignoré sur DAQ6510 (peut prendre >10s)
+            If Not c.EstDAQ6510 Then
+                EcrireRapport("TEST 2/3 — *TST?", RapportStyle.Section)
+                AvancerBarre(35)
+                Dim tst = c.Keithley.Query("*TST?")
+                AvancerBarre(70)
+                If tst.Trim() = "0" Then
+                    EcrireRapport("  ✔  Self-test OK.", RapportStyle.OK)
+                Else
+                    EcrireRapport("  ⚠  Code : " & tst, RapportStyle.Warn)
+                End If
             Else
-                EcrireRapport("  ⚠  Code : " & tst, RapportStyle.Warn)
+                EcrireRapport("TEST 2/3 — *TST? (ignoré sur DAQ6510 — durée > 10s)", RapportStyle.Section)
+                EcrireRapport("  ✔  Ignoré intentionnellement.", RapportStyle.OK)
+                AvancerBarre(70)
             End If
 
             ' TEST 3 : lecture voie
             EcrireRapport(String.Format("TEST 3/3 — Lecture voie {0}", voie), RapportStyle.Section)
-            c.Keithley.SendCommand(String.Format(":SENS:FUNC 'VOLT:DC',(@{0})", voie))
-            Thread.Sleep(300)
-            Dim mesure = c.Keithley.Query(String.Format(":MEAS:VOLT:DC? (@{0})", voie))
-            AvancerBarre(95)
-            Dim valD As Double
-            If mesure <> "" AndAlso Double.TryParse(mesure.Trim(),
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, valD) Then
-                EcrireRapport(String.Format("  ✔  Voie {0} : {1:F4} V", voie, valD), RapportStyle.OK)
+            If c.EstDAQ6510 Then
+                ' Augmenter le timeout le temps du test (mesure peut prendre 2-4s)
+                Dim oldTimeout = c.Keithley.ReadTimeout
+                c.Keithley.ReadTimeout = 8000
+                Try
+                    c.Keithley.SendCommand("*RST")
+                    Thread.Sleep(500)
+                    ' Forcer la fonction Tension DC sur ce canal précis
+                    c.Keithley.SendCommand(String.Format(":SENSe:FUNCtion 'VOLTage:DC',(@{0})", voie))
+                    Thread.Sleep(200)
+                    c.Keithley.SendCommand(":SENSe:VOLTage:DC:RANGe:AUTO ON")
+                    Thread.Sleep(100)
+                    ' Créer un scan sur cette seule voie et déclencher
+                    c.Keithley.SendCommand(String.Format(":ROUTe:SCAN:CREate (@{0})", voie))
+                    Thread.Sleep(100)
+                    c.Keithley.SendCommand(":INIT")
+                    ' Attendre la fin du scan via *OPC? (universel, tous firmware)
+                    Dim oldTmo = c.Keithley.ReadTimeout
+                    c.Keithley.ReadTimeout = 6000
+                    c.Keithley.Query("*OPC?")   ' bloque jusqu'à ce que le scan soit terminé
+                    c.Keithley.ReadTimeout = oldTmo
+                    Dim mesure = c.Keithley.Query(":FETCh?")
+                    ' Vider la file d'erreurs (ignorer 4910 = buffer vide bénin)
+                    Dim errStr = c.Keithley.Query(":SYSTem:ERRor?")
+                    Dim errLoop = 0
+                    Do While errStr <> "" AndAlso Not errStr.StartsWith("+0") AndAlso
+                               Not errStr.StartsWith("0,") AndAlso errLoop < 10
+                        If Not errStr.Contains("4910") Then
+                            EcrireRapport("  ⚠  Erreur instrument : " & errStr, RapportStyle.Warn)
+                        End If
+                        errStr = c.Keithley.Query(":SYSTem:ERRor?")
+                        errLoop += 1
+                    Loop
+                    AvancerBarre(95)
+                    Dim premier = mesure.Trim().Split(","c)(0)
+                    Dim valD As Double
+                    If premier <> "" AndAlso Double.TryParse(premier,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, valD) Then
+                        EcrireRapport(String.Format("  ✔  Voie {0} : {1:F4} V", voie, valD), RapportStyle.OK)
+                    Else
+                        EcrireRapport("  ⚠  " & If(mesure = "", "Timeout — vérifier DELAI_LECTURE_MS dans Détails SCPI", "Réponse : " & mesure), RapportStyle.Warn)
+                    End If
+                Finally
+                    c.Keithley.ReadTimeout = oldTimeout
+                End Try
             Else
-                EcrireRapport("  ⚠  " & If(mesure = "", "Timeout", mesure), RapportStyle.Warn)
+                c.Keithley.SendCommand(String.Format(":SENS:FUNC 'VOLT:DC',(@{0})", voie))
+                Thread.Sleep(300)
+                Dim mesure = c.Keithley.Query(String.Format(":MEAS:VOLT:DC? (@{0})", voie))
+                AvancerBarre(95)
+                Dim valD As Double
+                If mesure <> "" AndAlso Double.TryParse(mesure.Trim(),
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, valD) Then
+                    EcrireRapport(String.Format("  ✔  Voie {0} : {1:F4} V", voie, valD), RapportStyle.OK)
+                Else
+                    EcrireRapport("  ⚠  " & If(mesure = "", "Timeout", mesure), RapportStyle.Warn)
+                End If
             End If
             FinTests()
         End Sub) With {.IsBackground = True}
@@ -630,6 +702,12 @@ Public Class OngletConnexion
         c.IPAddress = ctrl.TxtIP.Text.Trim()
         c.Port      = CInt(ctrl.NumPort.Value)
         c.TimeoutMs = CInt(ctrl.NumTimeout.Value)
+        ' Propager le type de centrale
+        Select Case ctrl.CmbType.SelectedIndex
+            Case 0 : c.TypeCentrale = TypeCentrale.Keithley2701Ethernet
+            Case 1 : c.TypeCentrale = TypeCentrale.DAQ6510Ethernet
+            Case Else : c.TypeCentrale = TypeCentrale.Autre
+        End Select
     End Sub
 
     Private Sub MettreAJourEtatCentrale(numero As Integer, connecte As Boolean)

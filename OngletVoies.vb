@@ -276,8 +276,11 @@ Public Class PanneauVoiesCentrale
             Dim cfg = _configCartes(carte - 1)
             Dim cc  As New ControlsCarte()
 
-            cc.CmbType.Items.AddRange({"Module 7706", "Autre"})
-            cc.CmbType.SelectedIndex = If(cfg.Type = TypeCarte.Module7706, 0, 1)
+            cc.CmbType.Items.AddRange({"Module 7706 (sorties ±Us V)", "Module 7700 (mesure seule)", "Autre"})
+            Dim idxType = 0
+            If cfg.Type = TypeCarte.Module7700 Then idxType = 1
+            If cfg.Type = TypeCarte.Autre Then idxType = 2
+            cc.CmbType.SelectedIndex = idxType
             cc.CmbType.DropDownStyle = ComboBoxStyle.DropDownList
             cc.CmbType.Width         = 130
             cc.CmbType.Font          = New Font("Segoe UI", 9)
@@ -292,6 +295,14 @@ Public Class PanneauVoiesCentrale
             cc.TxtSorties.Width = 130
             cc.TxtSorties.Font  = New Font("Consolas", 9)
             cc.TxtSorties.Margin = New Padding(0, 1, 0, 0)
+            ' Masquer la zone Sorties si la carte n'en a pas (Module7700)
+            cc.TxtSorties.Visible = (cfg.Type <> TypeCarte.Module7700)
+            AddHandler cc.CmbType.SelectedIndexChanged, Sub(s, e)
+                ' 0=7706(sorties), 1=7700(pas de sorties), 2=Autre(sorties)
+                Dim aSorties = (cc.CmbType.SelectedIndex <> 1)
+                cc.TxtSorties.Visible = aSorties
+                If Not aSorties Then cc.TxtSorties.Text = ""
+            End Sub
 
             cc.LblErrEntrees.AutoSize  = True
             cc.LblErrEntrees.ForeColor = Color.Red
@@ -566,7 +577,7 @@ Public Class PanneauVoiesCentrale
         Dim colMode As New DataGridViewComboBoxColumn() With {
             .Name = "cSMode", .HeaderText = "Mode", .Width = 110
         }
-        colMode.Items.AddRange({"Booléen (0/+Us)", "Analogique [0;Us]", "Analogique [-Us;Us]"})
+        colMode.Items.AddRange({"Booléen (0/+Amp)", "Analogique (0..+Amp)", "Analogique full (−Amp..+Amp)"})
 
         _dgvSorties.Columns.AddRange({
             New DataGridViewTextBoxColumn()  With {.Name = "cSNum",     .HeaderText = "N° sortie",        .Width = 75,  .ReadOnly = True},
@@ -574,7 +585,7 @@ Public Class PanneauVoiesCentrale
             New DataGridViewCheckBoxColumn() With {.Name = "cSActif",   .HeaderText = "Actif",             .Width = 50},
             New DataGridViewTextBoxColumn()  With {.Name = "cSNom",     .HeaderText = "Nom du dispositif", .Width = 160},
             colMode,
-            New DataGridViewTextBoxColumn()  With {.Name = "cSUMax",    .HeaderText = "Us (V)",          .Width = 70},
+            New DataGridViewTextBoxColumn()  With {.Name = "cSUMax",    .HeaderText = "Amplitude (V)",          .Width = 70},
             New DataGridViewTextBoxColumn()  With {.Name = "cSSeuil",   .HeaderText = "Seuil ON (V)",      .Width = 80},
             New DataGridViewCheckBoxColumn() With {.Name = "cSSecuDebit", .HeaderText = "ARRET si Surveill. sécu.",  .Width = 85,
                 .ToolTipText = "Si coché : cette sortie est forcée à 0V quand une voie marquée 'Surveill. sécu.'" & vbCrLf &
@@ -583,14 +594,14 @@ Public Class PanneauVoiesCentrale
         })
 
         ' Tooltip d'aide sur les colonnes
-        _dgvSorties.Columns("cSMode").ToolTipText = "Booléen (0/+Us) : 0 V (OFF) ou +Us V (ON) — tout-ou-rien." & vbCrLf &
-                                                    "Analogique [0;Us] : tension de 0 V à +Us V." & vbCrLf &
-                                                    "Analogique [-Us;Us] : tension variable de −Amplitude V à +Us V." & vbCrLf &
+        _dgvSorties.Columns("cSMode").ToolTipText = "Booléen (0/+Amp) : 0 V (OFF) ou +Amplitude V (ON) — tout-ou-rien." & vbCrLf &
+                                                    "Analogique (0..+Amp) : tension de 0 V à +Amplitude V." & vbCrLf &
+                                                    "Analogique full (−Amp..+Amp) : tension variable de −Amplitude V à +Amplitude V." & vbCrLf &
                                                     "Usage : V3V, actionneur bidirectionnel, tout périphérique commandé en tension symétrique."
-        _dgvSorties.Columns("cSUMax").ToolTipText = "Us : tension maximale (V)." & vbCrLf &
+        _dgvSorties.Columns("cSUMax").ToolTipText = "Amplitude de tension (V)." & vbCrLf &
                                                     "Booléen : tension appliquée quand ON." & vbCrLf &
-                                                    "Analogique : tension maximale (de 0 à +Us)." & vbCrLf &
-                                                    "Analogique [-Us;Us] : amplitude maximale en valeur absolue (de −Us à +Us)." & vbCrLf &
+                                                    "Analogique : tension maximale (de 0 à +Amplitude)." & vbCrLf &
+                                                    "Analogique full : amplitude maximale en valeur absolue (de −Amplitude à +Amplitude)." & vbCrLf &
                                                     "Plage physique module 7706 : ±12 V."
         _dgvSorties.Columns("cSSeuil").ToolTipText   = "Tension à partir de laquelle la sortie est considérée ON (graphique)"
 
@@ -611,7 +622,7 @@ Public Class PanneauVoiesCentrale
         If e.RowIndex < 0 OrElse Not _dgvSorties.Columns.Contains("cSMode") Then Return
         Dim row     = _dgvSorties.Rows(e.RowIndex)
         Dim modeVal = If(row.Cells("cSMode").Value IsNot Nothing, row.Cells("cSMode").Value.ToString(), "")
-        Dim estAnal = modeVal.Contains("Analogique") OrElse modeVal.Contains("Analogique")
+        Dim estAnal = modeVal.Contains("Analogique") OrElse modeVal.Contains("Analogique full")
         row.Cells("cSSeuil").ReadOnly        = estAnal
         row.Cells("cSSeuil").Style.BackColor = If(estAnal, Color.FromArgb(235, 235, 235), Color.White)
         row.Cells("cSSeuil").Style.ForeColor = If(estAnal, Color.Gray, Color.Black)
@@ -699,8 +710,13 @@ Public Class PanneauVoiesCentrale
             Dim nouveauEntrees = cc.TxtEntrees.Text.Trim()
             Dim nouveauSorties = cc.TxtSorties.Text.Trim()
 
-            _configCartes(carte - 1).Type = If(cc.CmbType.SelectedIndex = 0,
-                TypeCarte.Module7706, TypeCarte.Autre)
+            Dim typeCarteChoisi As TypeCarte
+            Select Case cc.CmbType.SelectedIndex
+                Case 0 : typeCarteChoisi = TypeCarte.Module7706
+                Case 1 : typeCarteChoisi = TypeCarte.Module7700
+                Case Else : typeCarteChoisi = TypeCarte.Autre
+            End Select
+            _configCartes(carte - 1).Type = typeCarteChoisi
             _configCartes(carte - 1).PlageEntrees.TexteOriginal = nouveauEntrees
             _configCartes(carte - 1).PlageSorties.TexteOriginal = nouveauSorties
 
@@ -800,14 +816,14 @@ Public Class PanneauVoiesCentrale
 
             Dim actif    = CBool(If(row.Cells("cSActif").Value, False))
             Dim nom      = If(row.Cells("cSNom").Value   IsNot Nothing, row.Cells("cSNom").Value.ToString(),   "Sortie" & num)
-            Dim modeStr  = If(row.Cells("cSMode").Value  IsNot Nothing, row.Cells("cSMode").Value.ToString(),  "Booléen (0/+Us)")
+            Dim modeStr  = If(row.Cells("cSMode").Value  IsNot Nothing, row.Cells("cSMode").Value.ToString(),  "Booléen (0/+Amp)")
             Dim umax     = ParseD(row.Cells("cSUMax").Value,  5.0)
             Dim seuil    = ParseD(row.Cells("cSSeuil").Value, 2.5)
-            Dim mode = If(modeStr.Contains("[-Us;Us]"),
-                          SortieAnalogique.ModePilotage.AnalogiqueFull,
-                          If(modeStr.Contains("Analogique"),
-                             SortieAnalogique.ModePilotage.Analogique,
-                             SortieAnalogique.ModePilotage.Booleen))
+            Dim mode     = If(modeStr.Contains("Analogique full"),
+                              SortieAnalogique.ModePilotage.AnalogiqueFull,
+                              If(modeStr.Contains("Analogique"),
+                                 SortieAnalogique.ModePilotage.Analogique,
+                                 SortieAnalogique.ModePilotage.Booleen))
 
             c.Voies.Sorties.Add(New SortieAnalogique() With {
                 .Numero      = num,
@@ -894,8 +910,8 @@ Public Class PanneauVoiesCentrale
             Dim nom   = If(row.Cells("cSNom").Value IsNot Nothing,
                 row.Cells("cSNom").Value.ToString(), "Sortie" & num)
             Dim modeStr = If(row.Cells("cSMode").Value IsNot Nothing,
-                row.Cells("cSMode").Value.ToString(), "Booléen (0/+Us)")
-            Dim mode = If(modeStr.Contains("[-Us;Us]"),
+                row.Cells("cSMode").Value.ToString(), "Booléen (0/+Amp)")
+            Dim mode = If(modeStr.Contains("Analogique full"),
                 SortieAnalogique.ModePilotage.AnalogiqueFull,
                 If(modeStr.Contains("Analogique"),
                    SortieAnalogique.ModePilotage.Analogique,
@@ -997,7 +1013,10 @@ Public Class PanneauVoiesCentrale
             ' Recharger les valeurs dans les contrôles cartes
             For carte As Integer = 1 To nb
                 If _ctrlCartes.ContainsKey(carte) Then
-                    _ctrlCartes(carte).CmbType.SelectedIndex = If(_configCartes(carte - 1).Type = TypeCarte.Module7706, 0, 1)
+                    Dim idxCarte As Integer = 0
+                    If _configCartes(carte - 1).Type = TypeCarte.Module7700 Then idxCarte = 1
+                    If _configCartes(carte - 1).Type = TypeCarte.Autre Then idxCarte = 2
+                    _ctrlCartes(carte).CmbType.SelectedIndex = idxCarte
                     _ctrlCartes(carte).TxtEntrees.Text = _configCartes(carte - 1).PlageEntrees.TexteOriginal
                     _ctrlCartes(carte).TxtSorties.Text = _configCartes(carte - 1).PlageSorties.TexteOriginal
                 End If
@@ -1038,16 +1057,16 @@ Public Class PanneauVoiesCentrale
             row.Cells("cSActif").Value     = Config.GetBool(sec, cle & "_Actif", False)
             row.Cells("cSNom").Value       = Config.Get_(sec,    cle & "_Nom",   "Sortie" & num)
             ' Compatibilité ascendante : traduire les anciennes chaînes de mode
-            Dim modeVal = Config.Get_(sec, cle & "_Mode", "Booléen (0/+Us)")
+            Dim modeVal = Config.Get_(sec, cle & "_Mode", "Booléen (0/+Amp)")
             Select Case modeVal
-                Case "Booléen (0/Umax)", "Booléen (0/+Us)"
-                    modeVal = "Booléen (0/+Us)"
-                Case "Analogique (0–Umax)", "Analogique [0;Us]"
-                    modeVal = "Analogique [0;Us]"
-                Case "Analogique [-Us;Us]"
+                Case "Booléen (0/Umax)", "Booléen (0/+Amp)"
+                    modeVal = "Booléen (0/+Amp)"
+                Case "Analogique (0–Umax)", "Analogique (0..+Amp)"
+                    modeVal = "Analogique (0..+Amp)"
+                Case "Analogique full (−Amp..+Amp)"
                     ' déjà correct
                 Case Else
-                    modeVal = "Booléen (0/+Us)"   ' valeur inconnue → défaut
+                    modeVal = "Booléen (0/+Amp)"   ' valeur inconnue → défaut
             End Select
             row.Cells("cSMode").Value      = modeVal
             row.Cells("cSUMax").Value      = Config.Get_(sec,    cle & "_UMax",  "5")

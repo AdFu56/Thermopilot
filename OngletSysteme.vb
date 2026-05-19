@@ -25,7 +25,6 @@ Public Class EtiquetteValeur
     Public Property X            As Integer = 50
     Public Property Y            As Integer = 50
     Public Property ValeurTexte  As String = "---"
-    Public Property EstAnalogique As Boolean = False  ' True = sortie analogique → afficher tension
     Public Property EnAlarme     As Boolean = False
     Public Property CouleurTexte As Color = Color.White
     Public Property CouleurFond  As Color = Color.FromArgb(160, 0, 0, 0)
@@ -217,10 +216,12 @@ Public Class PanneauSchemaComplet
 
     ' ─── Propriétés publiques ─────────────────────────────────────────────────
 
-    Public Property Nom         As String = "Schéma"
-    Public Property Config      As ConfigManager
+    Public Property Nom          As String = "Schéma"
+    Public Property Config       As ConfigManager
     Public Property Gestionnaire As GestionnaireMultiCentrale
     Public Property GestCalculs  As GestionnaireCalculs = Nothing
+    ''' <summary>Référence au gestionnaire de voies pour propager avant actualisation.</summary>
+    Public Property GestionnaireVoies As GestionnaireOngletsVoies = Nothing
 
     ''' <summary>Section INI dédiée à ce sous-onglet (ex: "Systeme_0").</summary>
     Public Property SectionIni  As String = "Systeme_0"
@@ -246,8 +247,6 @@ Public Class PanneauSchemaComplet
 
     Public Event StatutChange(sender As Object, message As String, estErreur As Boolean)
     Public Event DemandeNotification(sender As Object)
-
-    ' ─── Construction ────────────────────────────────────────────────────────
 
     Public Function ConstruirePanel() As Control
         Dim pnl As New Panel() With {.Dock = DockStyle.Fill}
@@ -433,6 +432,9 @@ Public Class PanneauSchemaComplet
                 Dim etiq As EtiquetteValeur
                 If existantes.ContainsKey(id) Then
                     etiq = existantes(id)
+                    ' Mettre à jour le nom même si l'étiquette existe (nom peut avoir changé)
+                    etiq.NomAffiche  = v.Nom & " (" & v.Unite & ")"
+                    etiq.NomCentrale = c.NomAffiche
                 Else
                     etiq = New EtiquetteValeur() With {
                         .Id          = id,
@@ -445,20 +447,18 @@ Public Class PanneauSchemaComplet
             Next
             For Each s In c.Voies.SortiesActives()
                 Dim id = HistoriqueMultiCentrale.CleSortie(c.Numero, s.Numero)
-                Dim estAnal = (s.Mode = SortieAnalogique.ModePilotage.Analogique OrElse
-                               s.Mode = SortieAnalogique.ModePilotage.AnalogiqueFull)
                 Dim etiq As EtiquetteValeur
                 If existantes.ContainsKey(id) Then
                     etiq = existantes(id)
-                    etiq.EstAnalogique = estAnal
+                    etiq.NomAffiche  = s.Nom
+                    etiq.NomCentrale = c.NomAffiche
                 Else
                     etiq = New EtiquetteValeur() With {
-                        .Id            = id,
-                        .NomAffiche    = s.Nom,
-                        .NomCentrale   = c.NomAffiche,
-                        .TypeSource    = EtiquetteValeur.SourceType.Sortie,
-                        .EstAnalogique = estAnal,
-                        .CouleurFond   = Color.FromArgb(160, 20, 60, 20)
+                        .Id          = id,
+                        .NomAffiche  = s.Nom,
+                        .NomCentrale = c.NomAffiche,
+                        .TypeSource  = EtiquetteValeur.SourceType.Sortie,
+                        .CouleurFond = Color.FromArgb(160, 20, 60, 20)
                     }
                 End If
                 nouvelles.Add(etiq)
@@ -521,11 +521,7 @@ Public Class PanneauSchemaComplet
             If serie.Count = 0 Then Continue For
             Dim dernier = serie.Last()
             If etiq.TypeSource = EtiquetteValeur.SourceType.Sortie Then
-                If etiq.EstAnalogique Then
-                    etiq.ValeurTexte = dernier.Valeur.ToString("F2") & " V"
-                Else
-                    etiq.ValeurTexte = If(dernier.ValeurGraphiqueB >= 0.5, "ON", "OFF")
-                End If
+                etiq.ValeurTexte = If(dernier.ValeurGraphiqueB >= 0.5, "ON", "OFF")
             ElseIf dernier.EnErreur OrElse Double.IsNaN(dernier.Valeur) Then
                 etiq.ValeurTexte = "ERR"
             Else
@@ -600,6 +596,9 @@ Public Class PanneauSchemaComplet
     End Sub
 
     Private Sub BtnRafraichir_Click(sender As Object, e As EventArgs)
+        If GestionnaireVoies IsNot Nothing Then
+            GestionnaireVoies.PropagerTousVersGestionnaire()
+        End If
         ActualiserListeDepuisGestionnaire()
         RaiseEvent StatutChange(Me, "Liste actualisée — " & _etiquettes.Count & " éléments.", False)
     End Sub
@@ -672,6 +671,8 @@ Public Class OngletSysteme
     Public Property Config       As ConfigManager
     Public Property Gestionnaire As GestionnaireMultiCentrale
     Public Property GestCalculs  As GestionnaireCalculs = Nothing
+    ''' <summary>Référence au gestionnaire d'onglets voies pour propager avant actualisation.</summary>
+    Public Property GestionnaireVoies As GestionnaireOngletsVoies = Nothing
 
     Private _tabSousOnglets As New TabControl()
     Private _panneaux       As New List(Of PanneauSchemaComplet)
@@ -749,11 +750,12 @@ Public Class OngletSysteme
         Dim section = "Systeme_" & idx
 
         Dim panneau As New PanneauSchemaComplet() With {
-            .Nom          = nom,
-            .Config       = Config,
-            .Gestionnaire = Gestionnaire,
-            .GestCalculs  = GestCalculs,
-            .SectionIni   = section
+            .Nom              = nom,
+            .Config           = Config,
+            .Gestionnaire     = Gestionnaire,
+            .GestCalculs      = GestCalculs,
+            .SectionIni       = section,
+            .GestionnaireVoies = GestionnaireVoies
         }
         AddHandler panneau.StatutChange, Sub(s, msg, err)
             RaiseEvent StatutChange(s, msg, err)

@@ -69,6 +69,7 @@ Public Class FormPrincipal
     Private _splitDroit       As New SplitContainer()   ' séparateur tableau / graphique
     Private _btnToggleTableau  As New Button()            ' masquer/afficher le tableau
     Private _btnModeGraphique  As New Button()            ' bascule XY / histogramme
+    Private _btnCopieCSV       As New Button()            ' copie CSV temporaire vers onglet Résultats
     Private _splitCalculs     As SplitContainer = Nothing ' séparateur mesures / calculs
     Private _btnToggleCalculs As New Button()            ' masquer/afficher le panneau calculs
     Private _pnlCheckVoies  As New FlowLayoutPanel()   ' cases à cocher voies
@@ -568,13 +569,24 @@ Public Class FormPrincipal
                 "🧮 Afficher calculs", "🧮 Masquer calculs")
         End Sub
 
+        ' Bouton Copie CSV temporaire — visible seulement pendant acquisition CSV
+        _btnCopieCSV.Text      = "📋 Copie CSV"
+        _btnCopieCSV.BackColor = Color.FromArgb(80, 100, 50)
+        _btnCopieCSV.ForeColor = Color.White
+        _btnCopieCSV.FlatStyle = FlatStyle.Flat
+        _btnCopieCSV.Width     = 105
+        _btnCopieCSV.Height    = 28
+        _btnCopieCSV.Margin    = New Padding(8, 0, 0, 0)
+        _btnCopieCSV.Visible   = False
+        AddHandler _btnCopieCSV.Click, AddressOf BtnCopieCSV_Click
+
         tb.Controls.AddRange({
             _btnDemarrerAcq, _btnArreterAcq,
             lblInt, _numIntervalle, _cmbUniteIntervalle,
             _chkSauvegarder, btnGoCsv, _chkSimulation,
             lblFen, _numFenetre, _cmbUniteFenetre,
             _btnToggleTableau, _btnToggleCalculs,
-            _btnModeGraphique, ConstruireBoutonNotification()
+            _btnModeGraphique, _btnCopieCSV, ConstruireBoutonNotification()
         })
 
         ' Corps : 3 colonnes — liste voies/relais | grille valeurs | graphique
@@ -1072,6 +1084,7 @@ Public Class FormPrincipal
         If _acquisition.Demarrer() Then
             _btnDemarrerAcq.Enabled = False
             _btnArreterAcq.Enabled  = True
+            _btnCopieCSV.Visible    = _chkSauvegarder.Checked  ' visible seulement si CSV actif
             AfficherStatut("Acquisition en cours" &
                 If(_chkSimulation.Checked, " [SIMULATION]", ""))
         End If
@@ -1081,8 +1094,35 @@ Public Class FormPrincipal
         _acquisition.Arreter()
         _btnDemarrerAcq.Enabled = True
         _btnArreterAcq.Enabled  = False
+        _btnCopieCSV.Visible    = False
         AfficherStatut("Acquisition arrêtée")
         ExporterGraphiquePourRapport()
+    End Sub
+
+    ''' <summary>Copie le CSV en cours d'écriture dans un fichier TEMP_ et l'ouvre dans un nouvel onglet Résultats.</summary>
+    Private Sub BtnCopieCSV_Click(sender As Object, e As EventArgs)
+        Try
+            Dim cheminSrc = _acquisition.CheminCSV
+            If String.IsNullOrEmpty(cheminSrc) OrElse Not File.Exists(cheminSrc) Then
+                AfficherStatut("Copie CSV : fichier source introuvable.", True) : Return
+            End If
+            Dim dossier  = Path.GetDirectoryName(cheminSrc)
+            Dim nomFich  = Path.GetFileName(cheminSrc)
+            Dim cheminDst = Path.Combine(dossier, "TEMP_" & nomFich)
+            ' Copier avec autorisation de lecture même si le fichier est ouvert en écriture
+            Using src As New FileStream(cheminSrc, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
+                Using dst As New FileStream(cheminDst, FileMode.Create, FileAccess.Write, FileShare.None)
+                    src.CopyTo(dst)
+                End Using
+            End Using
+            ' Ouvrir dans un NOUVEL onglet Résultats
+            _tabControl.SelectedTab = _tabResultats
+            _ongletVisuCSV.AjouterOnglet(Nothing, EventArgs.Empty)
+            _ongletVisuCSV.OuvrirFichier(cheminDst)
+            AfficherStatut("Copie CSV ouverte dans l'onglet Résultats : " & Path.GetFileName(cheminDst))
+        Catch ex As Exception
+            AfficherStatut("Erreur copie CSV : " & ex.Message, True)
+        End Try
     End Sub
 
     ''' <summary>Exporte le graphique en PNG et le référence dans le générateur de rapport.</summary>

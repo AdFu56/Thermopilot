@@ -18,7 +18,6 @@ Public Class FormPrincipal
 
     Private _gestionnaire  As New GestionnaireMultiCentrale()
     Private _acquisition   As New MoteurAcquisition()
-    Private _horodatageAcq As String = ""   ' timestamp partagé CSV / Graphique / Rapport
     Private _acqDemarreeParChrono As Boolean = False  ' True si l'acquisition a été lancée automatiquement par le chronogramme
     Private _chronogramme  As New MoteurChronogramme()
     Private _historique    As New HistoriqueMultiCentrale(800)
@@ -76,13 +75,10 @@ Public Class FormPrincipal
     Private _pnlCheckRelais As New FlowLayoutPanel()   ' cases à cocher relais
     Private _btnDemarrerAcq As New Button()
     Private _btnArreterAcq  As New Button()
-    Private _btnCopieTemp   As New Button()   ' copie TEMP_ du CSV en cours
     Private _numIntervalle       As New NumericUpDown()
     Private _cmbUniteIntervalle  As New ComboBox()
     Private _numFenetre          As New NumericUpDown()  ' durée fenêtre glissante (0=tout)
     Private _cmbUniteFenetre     As New ComboBox()
-    Private _numBufferPoints     As New NumericUpDown()  ' nombre de points du buffer graphique
-    Private _lblDureeBuffer      As New Label()          ' indication durée correspondante
     Private _menuStrip           As New MenuStrip()
     Private _chkSauvegarder As New CheckBox()
     Private _chkSimulation  As New CheckBox()
@@ -263,19 +259,6 @@ Public Class FormPrincipal
         _generateurRapport.GestCalculs  = _gestCalculs
         _generateurRapport.Acquisition  = _acquisition
         _generateurRapport.OngletCSV    = _ongletCSV
-        ' Connecter l'événement d'erreur pour afficher MessageBox sur le thread UI
-        AddHandler _generateurRapport.ErreurGeneration,
-            Sub(s As Object, msg As String)
-                If Me.InvokeRequired Then
-                    Me.BeginInvoke(Sub()
-                        MessageBox.Show("Erreur génération rapport PDF :" & vbNewLine & msg,
-                            "Rapport", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                    End Sub)
-                Else
-                    MessageBox.Show("Erreur génération rapport PDF :" & vbNewLine & msg,
-                        "Rapport", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                End If
-            End Sub
         _ongletRapport.Config     = _config
         _ongletRapport.Generateur = _generateurRapport
         _ongletCSV.GestionVoies = Nothing
@@ -285,10 +268,9 @@ Public Class FormPrincipal
 
         _chronogramme.Gestionnaire = _gestionnaire
 
-        _ongletSysteme.Config          = _config
-        _ongletSysteme.Gestionnaire    = _gestionnaire
-        _ongletSysteme.GestCalculs     = _gestCalculs
-        _ongletSysteme.GestionnaireVoies = _gestionnaireVoies
+        _ongletSysteme.Config       = _config
+        _ongletSysteme.Gestionnaire = _gestionnaire
+        _ongletSysteme.GestCalculs  = _gestCalculs
         AddHandler _ongletSysteme.StatutChange,        Sub(s, msg, err) AfficherStatut(msg, err)
         AddHandler _ongletSysteme.DemandeNotification, Sub(s) BtnNotification_Click(s, EventArgs.Empty)
 
@@ -360,22 +342,13 @@ Public Class FormPrincipal
         End Sub
         AddHandler _chronogramme.ChronogrammeTermine,
             Sub(s) BeginInvoke(Sub()
-                ' Remettre les boutons chrono dans leur état initial
-                _btnDemarrerChrono.Enabled = True
-                _btnArreterChrono.Enabled  = False
                 AfficherStatut("Chronogramme terminé.")
                 If _chkArreterAcqFinChrono.Checked Then
                     _acquisition.Arreter()
                     _btnDemarrerAcq.Enabled = True
                     _btnArreterAcq.Enabled  = False
-                    _btnCopieTemp.Visible   = False
                     ExporterGraphiquePourRapport()
                     AfficherStatut("Chronogramme terminé — acquisition arrêtée.")
-                    If _ongletRapport.AutoGenerer Then
-                        CaptureChronoDataVersGenerateur()
-                        Dim infos = _ongletRapport.PreparerInfos("Chrono", _horodatageAcq)
-                        Task.Run(Sub() _ongletRapport.GenererRapportAvecInfos(infos))
-                    End If
                 Else
                     ExporterGraphiquePourRapport()
                 End If
@@ -467,12 +440,11 @@ Public Class FormPrincipal
         Dim pnl As New Panel() With {.Dock = DockStyle.Fill}
 
         ' Barre d'outils
-        ' ══ Barre 1 : contrôles principaux ══════════════════════════════════
         Dim tb As New FlowLayoutPanel() With {
             .Dock          = DockStyle.Top,
             .AutoSize      = True,
             .AutoSizeMode  = AutoSizeMode.GrowAndShrink,
-            .Padding       = New Padding(6, 4, 6, 2),
+            .Padding       = New Padding(6, 6, 6, 6),
             .WrapContents  = False
         }
         _btnDemarrerAcq.Text      = "▶ Démarrer"
@@ -491,21 +463,6 @@ Public Class FormPrincipal
         _btnArreterAcq.Height    = 28
         _btnArreterAcq.Enabled   = False
         _btnArreterAcq.Margin    = New Padding(0, 0, 6, 0)
-
-        ' Bouton copie TEMP_ — visible seulement pendant une acquisition CSV
-        _btnCopieTemp.Text      = "📋 Copie CSV temporaire"
-        _btnCopieTemp.BackColor = Color.FromArgb(60, 90, 130)
-        _btnCopieTemp.ForeColor = Color.White
-        _btnCopieTemp.FlatStyle = FlatStyle.Flat
-        _btnCopieTemp.Width     = 160
-        _btnCopieTemp.Height    = 28
-        _btnCopieTemp.Margin    = New Padding(12, 0, 0, 0)
-        _btnCopieTemp.Visible   = False
-        Dim ttCopie As New ToolTip()
-        ttCopie.SetToolTip(_btnCopieTemp,
-            "Copie le fichier CSV en cours d'acquisition vers TEMP_<nom>.csv" & vbCrLf &
-            "dans le même dossier, pour analyse dans l'onglet Résultats.")
-        AddHandler _btnCopieTemp.Click, AddressOf BtnCopieTemp_Click
 
         Dim lblInt As New Label() With {
             .Text = "Intervalle :", .AutoSize = True, .Margin = New Padding(10, 7, 2, 0)
@@ -540,26 +497,11 @@ Public Class FormPrincipal
         _chkSimulation.Text   = "Simulation"
         _chkSimulation.Margin = New Padding(12, 6, 0, 0)
 
-        tb.Controls.AddRange({
-            _btnDemarrerAcq, _btnArreterAcq, _btnCopieTemp,
-            lblInt, _numIntervalle, _cmbUniteIntervalle,
-            _chkSauvegarder, btnGoCsv, _chkSimulation
-        })
-
-        ' ══ Barre 2 : fenêtre, buffer, boutons graphique ══════════════════════
-        Dim tb2 As New FlowLayoutPanel() With {
-            .Dock          = DockStyle.Top,
-            .AutoSize      = True,
-            .AutoSizeMode  = AutoSizeMode.GrowAndShrink,
-            .Padding       = New Padding(6, 2, 6, 4),
-            .WrapContents  = False
-        }
-
         ' Fenêtre glissante
         Dim lblFen As New Label() With {
             .Text    = "Fenêtre :",
             .AutoSize = True,
-            .Margin  = New Padding(0, 7, 2, 0)
+            .Margin  = New Padding(16, 7, 2, 0)
         }
         _numFenetre.Minimum  = 0
         _numFenetre.Maximum  = 9999
@@ -570,7 +512,7 @@ Public Class FormPrincipal
         _numFenetre.Increment = 10
         _cmbUniteFenetre.DropDownStyle = ComboBoxStyle.DropDownList
         _cmbUniteFenetre.Width  = 60 : _cmbUniteFenetre.Height = 24
-        _cmbUniteFenetre.Margin = New Padding(0, 2, 10, 0)
+        _cmbUniteFenetre.Margin = New Padding(0, 2, 4, 0)
         _cmbUniteFenetre.Items.AddRange({"[s]", "[min]", "[h]"})
         _cmbUniteFenetre.SelectedIndex = 1
         Dim tt As New ToolTip()
@@ -581,39 +523,13 @@ Public Class FormPrincipal
         AddHandler _numFenetre.ValueChanged, Sub(s, e) MettreAJourFenetre()
         AddHandler _cmbUniteFenetre.SelectedIndexChanged, Sub(s, e) MettreAJourFenetre()
 
-        ' Buffer graphique
-        Dim lblBuf As New Label() With {
-            .Text      = "Buffer graphique :",
-            .AutoSize  = True,
-            .Margin    = New Padding(10, 7, 2, 0),
-            .ForeColor = Color.FromArgb(180, 195, 215)}
-        _numBufferPoints.Minimum   = 50
-        _numBufferPoints.Maximum   = 50000
-        _numBufferPoints.Value     = 800
-        _numBufferPoints.Width     = 65
-        _numBufferPoints.Height    = 24
-        _numBufferPoints.Increment = 100
-        _numBufferPoints.Margin    = New Padding(0, 2, 4, 0)
-        tt.SetToolTip(_numBufferPoints,
-            "Nombre de points conservés dans le buffer du graphique." & vbCrLf &
-            "Plus la valeur est élevée, plus la consommation mémoire est importante.")
-        tt.SetToolTip(lblBuf, "Nombre de points conservés dans le buffer du graphique.")
-        _lblDureeBuffer.AutoSize  = True
-        _lblDureeBuffer.ForeColor = Color.FromArgb(100, 200, 120)
-        _lblDureeBuffer.Font      = New Font("Segoe UI", 8.5, FontStyle.Italic)
-        _lblDureeBuffer.Text      = "≈ ?"
-        _lblDureeBuffer.Margin    = New Padding(0, 7, 14, 0)
-        AddHandler _numBufferPoints.ValueChanged,            Sub(s, e) MettreAJourBuffer()
-        AddHandler _numIntervalle.ValueChanged,              Sub(s, e) MettreAJourBuffer()
-        AddHandler _cmbUniteIntervalle.SelectedIndexChanged, Sub(s, e) MettreAJourBuffer()
-
         _btnToggleTableau.Text      = "⊞ Masquer tableau"
         _btnToggleTableau.BackColor = Color.FromArgb(55, 60, 80)
         _btnToggleTableau.ForeColor = Color.White
         _btnToggleTableau.FlatStyle = FlatStyle.Flat
         _btnToggleTableau.Width     = 140
         _btnToggleTableau.Height    = 28
-        _btnToggleTableau.Margin    = New Padding(0, 0, 0, 0)
+        _btnToggleTableau.Margin    = New Padding(8, 0, 0, 0)
         AddHandler _btnToggleTableau.Click, Sub(s, e)
             _splitDroit.Panel1Collapsed = Not _splitDroit.Panel1Collapsed
             _btnToggleTableau.Text = If(_splitDroit.Panel1Collapsed,
@@ -626,7 +542,7 @@ Public Class FormPrincipal
         _btnModeGraphique.FlatStyle = FlatStyle.Flat
         _btnModeGraphique.Width     = 115
         _btnModeGraphique.Height    = 28
-        _btnModeGraphique.Margin    = New Padding(6, 0, 0, 0)
+        _btnModeGraphique.Margin    = New Padding(8, 0, 0, 0)
         AddHandler _btnModeGraphique.Click, Sub(s, e)
             If _panelGraphique.Mode = ModeGraphique.SeriesTemporelles Then
                 _panelGraphique.Mode = ModeGraphique.Histogramme
@@ -644,7 +560,7 @@ Public Class FormPrincipal
         _btnToggleCalculs.FlatStyle = FlatStyle.Flat
         _btnToggleCalculs.Width     = 145
         _btnToggleCalculs.Height    = 28
-        _btnToggleCalculs.Margin    = New Padding(6, 0, 0, 0)
+        _btnToggleCalculs.Margin    = New Padding(8, 0, 0, 0)
         AddHandler _btnToggleCalculs.Click, Sub(s, e)
             If _splitCalculs Is Nothing Then Return
             _splitCalculs.Panel2Collapsed = Not _splitCalculs.Panel2Collapsed
@@ -652,9 +568,11 @@ Public Class FormPrincipal
                 "🧮 Afficher calculs", "🧮 Masquer calculs")
         End Sub
 
-        tb2.Controls.AddRange({
+        tb.Controls.AddRange({
+            _btnDemarrerAcq, _btnArreterAcq,
+            lblInt, _numIntervalle, _cmbUniteIntervalle,
+            _chkSauvegarder, btnGoCsv, _chkSimulation,
             lblFen, _numFenetre, _cmbUniteFenetre,
-            lblBuf, _numBufferPoints, _lblDureeBuffer,
             _btnToggleTableau, _btnToggleCalculs,
             _btnModeGraphique, ConstruireBoutonNotification()
         })
@@ -663,35 +581,74 @@ Public Class FormPrincipal
         Dim splitMain As New SplitContainer()
         splitMain.Dock = DockStyle.Fill
 
-        ' Panneau gauche : listes avec cases à cocher
-        Dim pnlGauche As New Panel() With {.Dock = DockStyle.Fill}
+        ' Panneau gauche : TableLayoutPanel 7 lignes
+        ' Panneau gauche : SplitContainer vertical entre voies et relais
+        Dim splitGauche As New SplitContainer() With {
+            .Dock = DockStyle.Fill,
+            .Orientation = Orientation.Horizontal,
+            .Panel1MinSize = 80, .Panel2MinSize = 80}
+        AddHandler splitGauche.HandleCreated, Sub(sc, ev)
+            Try : splitGauche.SplitterDistance = CInt(splitGauche.Height * 0.65) : Catch : End Try
+        End Sub
+
+        ' Panel1 : VOIES À TRACER (label → boutons → liste)
         Dim lblV As New Label() With {
             .Text = "VOIES À TRACER", .Dock = DockStyle.Top, .Height = 22,
             .Font = New Font("Segoe UI", 8, FontStyle.Bold),
-            .ForeColor = Color.FromArgb(80, 130, 190), .Padding = New Padding(4, 4, 0, 0)
-        }
-        _pnlCheckVoies.Dock          = DockStyle.Fill
-        _pnlCheckVoies.AutoScroll    = True
+            .ForeColor = Color.FromArgb(80, 130, 190), .Padding = New Padding(4, 4, 0, 0)}
+        Dim pnlBV As New Panel() With {.Dock = DockStyle.Top, .Height = 28}
+        Dim btnTV As New Button() With {.Text = "Tout",  .Width = 50, .Height = 24, .Left = 4,  .Top = 2, .FlatStyle = FlatStyle.Flat}
+        Dim btnAV As New Button() With {.Text = "Aucun", .Width = 55, .Height = 24, .Left = 58, .Top = 2, .FlatStyle = FlatStyle.Flat}
+        AddHandler btnTV.Click, Sub(s, e)
+            For Each chkV In _pnlCheckVoies.Controls.OfType(Of CheckBox)()
+                chkV.Checked = True
+            Next
+        End Sub
+        AddHandler btnAV.Click, Sub(s, e)
+            For Each chkV In _pnlCheckVoies.Controls.OfType(Of CheckBox)()
+                chkV.Checked = False
+            Next
+        End Sub
+        pnlBV.Controls.AddRange({btnTV, btnAV})
+        _pnlCheckVoies.Dock = DockStyle.Fill
+        _pnlCheckVoies.AutoScroll = True
         _pnlCheckVoies.FlowDirection = FlowDirection.TopDown
-        _pnlCheckVoies.WrapContents  = False
-        _pnlCheckVoies.Padding       = New Padding(4)
+        _pnlCheckVoies.WrapContents = False
+        _pnlCheckVoies.Padding = New Padding(4)
+        splitGauche.Panel1.Controls.Add(_pnlCheckVoies)  ' Fill
+        splitGauche.Panel1.Controls.Add(pnlBV)            ' Top
+        splitGauche.Panel1.Controls.Add(lblV)             ' Top
 
+        ' Panel2 : SORTIES ANALOGIQUES (label → boutons → liste)
         Dim lblR As New Label() With {
-            .Text = "SORTIES ANALOGIQUES", .Dock = DockStyle.Bottom, .Height = 22,
+            .Text = "SORTIES ANALOGIQUES", .Dock = DockStyle.Top, .Height = 22,
             .Font = New Font("Segoe UI", 8, FontStyle.Bold),
-            .ForeColor = Color.FromArgb(160, 80, 30), .Padding = New Padding(4, 4, 0, 0)
-        }
-        _pnlCheckRelais.Dock          = DockStyle.Bottom
-        _pnlCheckRelais.Height        = 120
-        _pnlCheckRelais.AutoScroll    = True
+            .ForeColor = Color.FromArgb(160, 80, 30),
+            .BackColor = Color.FromArgb(252, 244, 240), .Padding = New Padding(4, 4, 0, 0)}
+        Dim pnlBR As New Panel() With {.Dock = DockStyle.Top, .Height = 28}
+        Dim btnTR As New Button() With {.Text = "Tout",  .Width = 50, .Height = 24, .Left = 4,  .Top = 2, .FlatStyle = FlatStyle.Flat}
+        Dim btnAR As New Button() With {.Text = "Aucun", .Width = 55, .Height = 24, .Left = 58, .Top = 2, .FlatStyle = FlatStyle.Flat}
+        AddHandler btnTR.Click, Sub(s, e)
+            For Each chkR In _pnlCheckRelais.Controls.OfType(Of CheckBox)()
+                chkR.Checked = True
+            Next
+        End Sub
+        AddHandler btnAR.Click, Sub(s, e)
+            For Each chkR In _pnlCheckRelais.Controls.OfType(Of CheckBox)()
+                chkR.Checked = False
+            Next
+        End Sub
+        pnlBR.Controls.AddRange({btnTR, btnAR})
+        _pnlCheckRelais.Dock = DockStyle.Fill
+        _pnlCheckRelais.AutoScroll = True
         _pnlCheckRelais.FlowDirection = FlowDirection.TopDown
-        _pnlCheckRelais.WrapContents  = False
-        _pnlCheckRelais.Padding       = New Padding(4)
+        _pnlCheckRelais.WrapContents = False
+        _pnlCheckRelais.Padding = New Padding(4)
+        splitGauche.Panel2.Controls.Add(_pnlCheckRelais)  ' Fill
+        splitGauche.Panel2.Controls.Add(pnlBR)             ' Top
+        splitGauche.Panel2.Controls.Add(lblR)              ' Top
 
-        pnlGauche.Controls.Add(_pnlCheckVoies)
-        pnlGauche.Controls.Add(_pnlCheckRelais)
-        pnlGauche.Controls.Add(lblR)
-        pnlGauche.Controls.Add(lblV)
+        splitMain.Panel1.Controls.Add(splitGauche)
 
         ' Panneau droit : grille + graphique
         _splitDroit.Dock        = DockStyle.Fill
@@ -719,12 +676,10 @@ Public Class FormPrincipal
         _splitDroit.Panel1.Controls.Add(_dgvMesures)
         _splitDroit.Panel2.Controls.Add(_panelGraphique)
 
-        splitMain.Panel1.Controls.Add(pnlGauche)
         splitMain.Panel2.Controls.Add(_splitDroit)
 
-        pnl.Controls.Add(splitMain)  ' Fill — en premier
-        pnl.Controls.Add(tb2)        ' Top — ligne 2 (ajouté avant tb → apparaît en dessous)
-        pnl.Controls.Add(tb)         ' Top — ligne 1 (ajouté en dernier → apparaît en haut)
+        pnl.Controls.Add(splitMain)
+        pnl.Controls.Add(tb)
         _tabAcquisition.Controls.Add(pnl)
     End Sub
 
@@ -768,21 +723,13 @@ Public Class FormPrincipal
         _tabAcquisition.Controls.Add(split)
         _splitCalculs = split   ' stocker pour le bouton toggle
 
-        AddHandler split.HandleCreated,
-            Sub(sc, ev)
-                split.BeginInvoke(New Action(Sub()
-                    Try
-                        split.Panel1MinSize = 200
-                        split.Panel2MinSize = 180
-                        Dim d = CInt(split.Height * 0.65)
-                        If d >= split.Panel1MinSize AndAlso
-                           d <= split.Height - split.Panel2MinSize Then
-                            split.SplitterDistance = d
-                        End If
-                    Catch
-                    End Try
-                End Sub))
-            End Sub
+        ' Définir les contraintes après ajout
+        split.Panel1MinSize = 200
+        split.Panel2MinSize = 180
+        Try
+            split.SplitterDistance = CInt(split.Height * 0.65)
+        Catch
+        End Try
 
         ' Démarrer avec le panneau calculs masqué
         split.Panel2Collapsed = True
@@ -848,16 +795,13 @@ Public Class FormPrincipal
 
             For Each sor In c.Voies.SortiesActives()
                 Dim cle = HistoriqueMultiCentrale.CleSortie(c.Numero, sor.Numero)
-                Dim estAnal = (sor.Mode = SortieAnalogique.ModePilotage.Analogique OrElse
-                               sor.Mode = SortieAnalogique.ModePilotage.AnalogiqueFull)
                 Dim sg As New PanelGraphique.SerieGraphique() With {
                     .Cle         = cle,
                     .Nom         = sor.Nom,
                     .NomCentrale = c.NomAffiche,
-                    .Unite       = If(estAnal, "V", "ON/OFF"),
-                    .EstBinaire  = Not estAnal,
-                    .EstSortieAnal = estAnal,
-                    .Visible     = False
+                    .Unite       = "ON/OFF",
+                    .EstBinaire  = True,
+                    .Visible     = False   ' masqué par défaut
                 }
                 series.Add(sg)
 
@@ -904,6 +848,13 @@ Public Class FormPrincipal
         Next
 
         _panelGraphique.DefinirSeries(series)
+
+        ' Forcer le recalcul de AutoScrollMinSize pour que l'ascenseur
+        ' descende jusqu'au dernier élément
+        _pnlCheckVoies.AutoScrollMinSize = New Size(0,
+            _pnlCheckVoies.Controls.OfType(Of CheckBox)().Sum(Function(c) c.Height + c.Margin.Vertical) + 40)
+        _pnlCheckRelais.AutoScrollMinSize = New Size(0,
+            _pnlCheckRelais.Controls.OfType(Of CheckBox)().Sum(Function(c) c.Height + c.Margin.Vertical) + 40)
     End Sub
 
     ' ─── ONGLET RELAIS ───────────────────────────────────────────────────────
@@ -1107,10 +1058,8 @@ Public Class FormPrincipal
         _acquisition.ModeSim        = If(_chkSimulation.Checked,
             MoteurAcquisition.ModeSimulation.MonteeEnTemperature,
             MoteurAcquisition.ModeSimulation.Desactive)
-        ' Capturer le timestamp une seule fois — partagé par CSV, Graphique et Rapport
-        _horodatageAcq = DateTime.Now.ToString("yyyyMMdd-HHmmss")
         If _chkSauvegarder.Checked Then
-            _acquisition.CheminCSV = _ongletCSV.CheminFigeAvecHorodatage(_horodatageAcq)
+            _acquisition.CheminCSV = _ongletCSV.CheminFige()
             _gestionnaire.FormatCSV          = _ongletCSV.FormatValeur
             _gestionnaire.LibelleUniteDuree  = _ongletCSV.LibelleUniteDuree
             _gestionnaire.DiviseurDuree      = _ongletCSV.DiviseurDuree
@@ -1123,131 +1072,20 @@ Public Class FormPrincipal
         If _acquisition.Demarrer() Then
             _btnDemarrerAcq.Enabled = False
             _btnArreterAcq.Enabled  = True
-            _btnCopieTemp.Visible   = _acquisition.StockerCSV
             AfficherStatut("Acquisition en cours" &
                 If(_chkSimulation.Checked, " [SIMULATION]", ""))
         End If
-    End Sub
-
-    ''' <summary>
-    ''' Copie le fichier CSV en cours d'acquisition vers TEMP_&lt;nom&gt;.csv dans le même dossier.
-    ''' Utilise File.Copy (plus fiable que robocopy sur fichier ouvert avec Flush).
-    ''' </summary>
-    Private Sub BtnCopieTemp_Click(sender As Object, e As EventArgs)
-        If Not _acquisition.EnCours OrElse Not _acquisition.StockerCSV Then
-            AfficherStatut("Aucune acquisition CSV en cours.", True)
-            Return
-        End If
-        Dim cheminSrc = _acquisition.CheminCSV
-        If String.IsNullOrEmpty(cheminSrc) OrElse Not IO.File.Exists(cheminSrc) Then
-            AfficherStatut("Fichier CSV introuvable : " & cheminSrc, True)
-            Return
-        End If
-        Try
-            Dim dossier  = IO.Path.GetDirectoryName(cheminSrc)
-            Dim nomFich  = IO.Path.GetFileName(cheminSrc)
-            Dim cheminDst = IO.Path.Combine(dossier, "TEMP_" & nomFich)
-            ' Flush du buffer CSV avant copie
-            _acquisition.FlushCSV()
-            ' Copie via robocopy /B pour ignorer le verrou d'écriture
-            Dim psi As New Diagnostics.ProcessStartInfo("robocopy") With {
-                .Arguments      = String.Format("""{0}"" ""{1}"" ""{2}"" /B /NP /NJH /NJS",
-                                     dossier, dossier, nomFich),
-                .UseShellExecute        = False,
-                .CreateNoWindow         = True,
-                .RedirectStandardOutput = True
-            }
-            ' Renommer en TEMP_ après copie (robocopy ne change pas le nom)
-            ' On utilise plutôt File.Copy avec overwrite, le flush garantit la cohérence
-            IO.File.Copy(cheminSrc, cheminDst, overwrite:=True)
-            AfficherStatut("Copie TEMP créée : " & IO.Path.GetFileName(cheminDst))
-            ' Proposer d'ouvrir dans l'onglet Résultats
-            Dim rep = MessageBox.Show(
-                "Copie créée :" & vbCrLf & cheminDst & vbCrLf & vbCrLf &
-                "Ouvrir dans l'onglet Résultats ?",
-                "Copie TEMP", MessageBoxButtons.YesNo, MessageBoxIcon.Information)
-            If rep = DialogResult.Yes Then
-                _tabControl.SelectedTab = _tabResultats
-                _ongletVisuCSV.OuvrirFichier(cheminDst)
-            End If
-        Catch ex As Exception
-            AfficherStatut("Erreur copie TEMP : " & ex.Message, True)
-        End Try
     End Sub
 
     Private Sub BtnArreterAcq_Click(sender As Object, e As EventArgs)
         _acquisition.Arreter()
         _btnDemarrerAcq.Enabled = True
         _btnArreterAcq.Enabled  = False
-        _btnCopieTemp.Visible   = False
         AfficherStatut("Acquisition arrêtée")
         ExporterGraphiquePourRapport()
-        ' Générer le rapport automatiquement si la case est cochée
-        If _ongletRapport.AutoGenerer Then
-            CaptureChronoDataVersGenerateur()
-            Dim infos = _ongletRapport.PreparerInfos("Acq", _horodatageAcq)
-            Task.Run(Sub() _ongletRapport.GenererRapportAvecInfos(infos))
-        End If
     End Sub
 
     ''' <summary>Exporte le graphique en PNG et le référence dans le générateur de rapport.</summary>
-    ''' <summary>
-    ''' Capture les données des DGV Etapes et Regles (contrôles UI) vers le générateur
-    ''' sous forme de données brutes. À appeler depuis le thread UI avant Task.Run.
-    ''' </summary>
-    Private Sub CaptureChronoDataVersGenerateur()
-        ' Identifier toutes les colonnes de sorties dans le DGV
-        Dim colsSorties As New List(Of (Id As String, Nom As String, EstAnal As Boolean))
-        For Each item In _gestionnaire.ToutesSortiesActives()
-            Dim id = HistoriqueMultiCentrale.CleSortie(item.Centrale.Numero, item.Sortie.Numero)
-            Dim estAnal = (item.Sortie.Mode = SortieAnalogique.ModePilotage.Analogique OrElse
-                           item.Sortie.Mode = SortieAnalogique.ModePilotage.AnalogiqueFull)
-            Dim nom = String.Format("[C{0}] {1}", item.Centrale.Numero, item.Sortie.Nom)
-            colsSorties.Add((id, nom, estAnal))
-        Next
-
-        ' Capturer les étapes avec leurs valeurs de sorties
-        Dim etapesData As New List(Of Dictionary(Of String, String))
-        For Each row As DataGridViewRow In _dgvEtapes.Rows
-            Dim d As New Dictionary(Of String, String)
-            d("nom")   = If(row.Cells("colNom").Value   IsNot Nothing, row.Cells("colNom").Value.ToString(),   "")
-            d("duree") = If(row.Cells("colDuree").Value IsNot Nothing, row.Cells("colDuree").Value.ToString(), "")
-            ' Ajouter les états/tensions de chaque sortie
-            For Each col In colsSorties
-                Dim valStr = ""
-                If _dgvEtapes.Columns.Contains(col.Id) AndAlso row.Cells(col.Id).Value IsNot Nothing Then
-                    valStr = row.Cells(col.Id).Value.ToString()
-                End If
-                If col.EstAnal Then
-                    d("sortie_anal_" & col.Id) = col.Nom & "=" & If(valStr <> "", valStr & " V", "maintien")
-                Else
-                    Dim etat = If(valStr <> "" AndAlso CBool(If(row.Cells(col.Id).Value, False)), "ON", "OFF")
-                    d("sortie_bool_" & col.Id) = col.Nom & "=" & etat
-                End If
-            Next
-            etapesData.Add(d)
-        Next
-        _generateurRapport.EtapesChronoData = etapesData
-
-        ' Capturer les règles actives
-        Dim reglesData As New List(Of Dictionary(Of String, String))
-        For Each row As DataGridViewRow In _dgvRegles.Rows
-            If Not CBool(If(row.Cells("rActif").Value, False)) Then Continue For
-            Dim d As New Dictionary(Of String, String)
-            d("rVoie")   = If(row.Cells("rVoie").Value   IsNot Nothing, row.Cells("rVoie").Value.ToString(),   "")
-            d("rOp")     = If(row.Cells("rOp").Value     IsNot Nothing, row.Cells("rOp").Value.ToString(),     "")
-            d("rVal")    = If(row.Cells("rVal").Value    IsNot Nothing, row.Cells("rVal").Value.ToString(),    "")
-            d("rRelais") = If(row.Cells("rRelais").Value IsNot Nothing, row.Cells("rRelais").Value.ToString(), "")
-            d("rAction") = If(row.Cells("rAction").Value IsNot Nothing, row.Cells("rAction").Value.ToString(), "")
-            reglesData.Add(d)
-        Next
-        _generateurRapport.ReglesChronoData = reglesData
-
-        ' Capturer FormatValeur et LibelleUniteDuree depuis OngletCSV
-        _generateurRapport.FormatValeur      = _ongletCSV.FormatValeur
-        _generateurRapport.LibelleUniteDuree = _ongletCSV.LibelleUniteDuree
-    End Sub
-
     Private Sub ExporterGraphiquePourRapport()
         If Not _ongletRapport.SauverGraphique Then Return
         Try
@@ -1255,7 +1093,7 @@ Public Class FormPrincipal
             If String.IsNullOrEmpty(dossier) Then Return
             Directory.CreateDirectory(dossier)
             Dim cheminPNG = Path.Combine(dossier,
-                "Graphique_" & If(_horodatageAcq <> "", _horodatageAcq, DateTime.Now.ToString("yyyyMMdd-HHmmss")) & ".png")
+                "Graphique_" & DateTime.Now.ToString("yyyyMMdd-HHmmss") & ".png")
             If _panelGraphique.ExporterPNGSilencieux(cheminPNG, 1400, 700) Then
                 _generateurRapport.CheminGraphique = cheminPNG
                 AfficherStatut("Graphique sauvegardé → " & Path.GetFileName(cheminPNG))
@@ -1438,41 +1276,10 @@ Public Class FormPrincipal
         Dim splitB As New SplitContainer()
         splitB.Dock        = DockStyle.Fill
         splitB.Orientation = Orientation.Horizontal
-        AddHandler splitB.HandleCreated,
-            Sub(sc, ev)
-                splitB.BeginInvoke(New Action(Sub()
-                    Try
-                        splitB.Panel1MinSize = 80
-                        splitB.Panel2MinSize = 180
-                        Dim d = CInt(splitB.Height * 0.35)
-                        If d >= splitB.Panel1MinSize AndAlso
-                           d <= splitB.Height - splitB.Panel2MinSize Then
-                            splitB.SplitterDistance = d
-                        End If
-                    Catch
-                    End Try
-                End Sub))
-            End Sub
         splitB.Panel1.Controls.Add(ConstruirePanneauRegles())
         splitB.Panel2.Controls.Add(pnlB)
         split.Panel2.Controls.Clear()
         split.Panel2.Controls.Add(splitB)
-
-        AddHandler split.HandleCreated,
-            Sub(sc, ev)
-                split.BeginInvoke(New Action(Sub()
-                    Try
-                        split.Panel1MinSize = 150
-                        split.Panel2MinSize = 220
-                        Dim d = CInt(split.Height * 0.55)
-                        If d >= split.Panel1MinSize AndAlso
-                           d <= split.Height - split.Panel2MinSize Then
-                            split.SplitterDistance = d
-                        End If
-                    Catch
-                    End Try
-                End Sub))
-            End Sub
 
         _tabChrono.Controls.Add(split)
     End Sub
@@ -1564,8 +1371,8 @@ Public Class FormPrincipal
             .HeaderText  = "Tension cible (V)",
             .Width       = 110,
             .ToolTipText = "Tension à appliquer quand l'action est 'Régler tension'." & vbCrLf &
-                           "Mode Analogique [0;Us] : valeur de 0 à +Us V." & vbCrLf &
-                           "Mode Analogique [-Us;Us] : valeur de −Us à +Us V."
+                           "Mode Analogique : valeur positive (0 à +Amplitude)." & vbCrLf &
+                           "Mode Analogique full : valeur positive ou négative (−Amplitude à +Amplitude)."
         }
 
         ' Colonne description auto
@@ -1742,7 +1549,7 @@ Public Class FormPrincipal
                         .HeaderText  = nomBase & " (V)",
                         .Width       = 120,
                         .ToolTipText = String.Format(
-                            "Tension [0 ; {0:F1} V]{1}Vide = 0 V (sauf si case Maintien cochée).", amp, vbCrLf)
+                            "Tension 0 à +{0:F1} V.{1}Vide = 0 V (sauf si case Maintien cochée).", amp, vbCrLf)
                     }
                     _dgvEtapes.Columns.Add(colEtape)
                     ' Case à cocher Maintien
@@ -1763,7 +1570,7 @@ Public Class FormPrincipal
                             "Tension de sortie : de −{0:F1} V à +{0:F1} V.{1}" &
                             "Valeur négative : tension dans le sens −.{1}" &
                             "Valeur positive : tension dans le sens +.{1}" &
-                            "Tension [-{0:F1} V ; {0:F1} V]. Vide = 0 V sauf si Maintien coché.", amp, vbCrLf)
+                            "0 V = neutre/arrêt.{1}Vide = 0 V sauf si case Maintien cochée.", amp, vbCrLf)
                     }
                     _dgvEtapes.Columns.Add(colAnaFull)
                     Dim colMntAnaFull As New DataGridViewCheckBoxColumn() With {
@@ -1825,26 +1632,6 @@ Public Class FormPrincipal
     End Sub
 
     Private Sub BtnDemarrerChrono_Click(s As Object, e As EventArgs)
-        ' ── Lire les cases Maintien AVANT la boucle (propriété globale par colonne) ──
-        ' Maintien = True dès qu'au moins une ligne a la case cochée
-        For Each item In _gestionnaire.ToutesSortiesActives()
-            If item.Sortie.Mode <> SortieAnalogique.ModePilotage.Analogique AndAlso
-               item.Sortie.Mode <> SortieAnalogique.ModePilotage.AnalogiqueFull Then Continue For
-            Dim id    = HistoriqueMultiCentrale.CleSortie(item.Centrale.Numero, item.Sortie.Numero)
-            Dim idMnt = id & "_MNT"
-            Dim maintien = False
-            If _dgvEtapes.Columns.Contains(idMnt) Then
-                For Each row As DataGridViewRow In _dgvEtapes.Rows
-                    If CBool(If(row.Cells(idMnt).Value, False)) Then
-                        maintien = True
-                        Exit For
-                    End If
-                Next
-            End If
-            Dim rd = _chronogramme.RelaisDynamiques.FirstOrDefault(Function(r) r.Id = id)
-            If rd IsNot Nothing Then rd.Maintien = maintien
-        Next
-
         _chronogramme.Etapes.Clear()
         For Each row As DataGridViewRow In _dgvEtapes.Rows
             Dim etape As New EtapeChronogramme() With {
@@ -1873,7 +1660,12 @@ Public Class FormPrincipal
                                 System.Globalization.CultureInfo.InvariantCulture, etapeVal)
                         End If
                         etape.TensionsSorties(id) = etapeVal
-                        ' Note : rd.Maintien est lu avant la boucle (propriété de colonne)
+
+                        ' Lire la case Maintien et mettre à jour le RelaisDynamique
+                        Dim maintien = _dgvEtapes.Columns.Contains(idMnt) AndAlso
+                                       CBool(If(row.Cells(idMnt).Value, False))
+                        Dim rd = _chronogramme.RelaisDynamiques.FirstOrDefault(Function(r) r.Id = id)
+                        If rd IsNot Nothing Then rd.Maintien = maintien
 
                     Case Else   ' Booléen
                         If row.Cells(id) IsNot Nothing Then
@@ -1940,23 +1732,6 @@ Public Class FormPrincipal
             End Select
         Next
         _acquisition.ContexteChronogramme = ctx
-
-        ' ── Appliquer rd.Maintien juste avant Demarrer (après toute construction des étapes) ──
-        For Each item In _gestionnaire.ToutesSortiesActives()
-            If item.Sortie.Mode <> SortieAnalogique.ModePilotage.Analogique AndAlso
-               item.Sortie.Mode <> SortieAnalogique.ModePilotage.AnalogiqueFull Then Continue For
-            Dim idM    = HistoriqueMultiCentrale.CleSortie(item.Centrale.Numero, item.Sortie.Numero)
-            Dim idMnt  = idM & "_MNT"
-            Dim mnt    = False
-            If _dgvEtapes.Columns.Contains(idMnt) Then
-                For Each row As DataGridViewRow In _dgvEtapes.Rows
-                    If CBool(If(row.Cells(idMnt).Value, False)) Then mnt = True : Exit For
-                Next
-            End If
-            Dim rdM = _chronogramme.RelaisDynamiques.FirstOrDefault(Function(r) r.Id = idM)
-            If rdM IsNot Nothing Then rdM.Maintien = mnt
-        Next
-
         _chronogramme.Demarrer()
 
         ' ── Démarrer ou reconfigurer l'acquisition ──
@@ -1969,9 +1744,7 @@ Public Class FormPrincipal
             _acquisition.ModeSim        = If(_chkSimulation.Checked,
                 MoteurAcquisition.ModeSimulation.MonteeEnTemperature,
                 MoteurAcquisition.ModeSimulation.Desactive)
-            ' Timestamp partagé CSV / Graphique / Rapport
-            _horodatageAcq = DateTime.Now.ToString("yyyyMMdd-HHmmss")
-            _acquisition.CheminCSV = _ongletCSV.CheminFigeAvecHorodatage(_horodatageAcq)
+            _acquisition.CheminCSV = _ongletCSV.CheminFige()
             _gestionnaire.FormatCSV          = _ongletCSV.FormatValeur
             _gestionnaire.LibelleUniteDuree  = _ongletCSV.LibelleUniteDuree
             _gestionnaire.DiviseurDuree      = _ongletCSV.DiviseurDuree
@@ -1986,10 +1759,16 @@ Public Class FormPrincipal
                 ' Génération automatique du rapport avec contexte chronogramme
                 If _ongletRapport.AutoGenerer Then
                     _generateurRapport.ChronoActif   = True
+                    _generateurRapport.DgvEtapes     = _dgvEtapes
+                    _generateurRapport.DgvRegles     = _dgvRegles
                     _generateurRapport.ArreterAcqFin = _chkArreterAcqFinChrono.Checked
-                    CaptureChronoDataVersGenerateur()
-                    Dim infosC = _ongletRapport.PreparerInfos("Chrono", _horodatageAcq)
-                    Task.Run(Sub() _ongletRapport.GenererRapportAvecInfos(infosC))
+                    _generateurRapport.Operateur   = _ongletRapport.Operateur
+                    _generateurRapport.Laboratoire = _ongletRapport.Laboratoire
+                    _generateurRapport.Projet      = _ongletRapport.Projet
+                    _generateurRapport.Notes       = _ongletRapport.Notes
+                    _generateurRapport.CheminLogo  = _ongletRapport.CheminLogo
+                    _generateurRapport.NomPolice   = _ongletRapport.NomPolice
+                    Task.Run(Sub() _ongletRapport.GenererRapport("Chrono"))
                 End If
                 AfficherStatut("Chronogramme démarré  +  Acquisition démarrée (CSV activé automatiquement)")
             Else
@@ -2033,7 +1812,6 @@ Public Class FormPrincipal
             _acqDemarreeParChrono   = False
             _btnDemarrerAcq.Enabled = True
             _btnArreterAcq.Enabled  = False
-            _btnCopieTemp.Visible   = False
             AfficherStatut("Chronogramme et acquisition arrêtés")
         Else
             AfficherStatut("Chronogramme arrêté")
@@ -2167,7 +1945,11 @@ Public Class FormPrincipal
         End Try
     End Sub
 
-    Private ReadOnly TITRE_BASE As String = AppInfo.TitreComplet
+    Private ReadOnly Property TITRE_BASE As String
+        Get
+            Return AppInfo.TitreComplet
+        End Get
+    End Property
 
     Private Sub MettreAJourTitre()
         Dim nomFichier = IO.Path.GetFileName(ConfigManager.CheminFichier)
@@ -2185,27 +1967,6 @@ Public Class FormPrincipal
             End Try
         End If
         _panelGraphique.FenetreSecondes = fen
-    End Sub
-
-    Private Sub MettreAJourBuffer()
-        ' Mettre à jour MaxPoints dans l'historique
-        Dim nb = CInt(_numBufferPoints.Value)
-        _historique.MaxPoints = nb
-
-        ' Calculer la durée correspondante
-        Try
-            Dim intervSec As Double = ParseurDuree.EnSecondes(
-                CInt(_numIntervalle.Value).ToString() &
-                ParseurDuree.SuffixeParIndex(_cmbUniteIntervalle.SelectedIndex))
-            If intervSec > 0 Then
-                Dim dureeSec = nb * intervSec
-                _lblDureeBuffer.Text = "≈ " & ParseurDuree.FormatAuto(dureeSec)
-            Else
-                _lblDureeBuffer.Text = "≈ ?"
-            End If
-        Catch
-            _lblDureeBuffer.Text = "≈ ?"
-        End Try
     End Sub
 
     Private Sub SauvegarderConfig()
@@ -2375,8 +2136,6 @@ Public Class FormPrincipal
 
     Protected Overrides Sub OnLoad(e As EventArgs)
         MyBase.OnLoad(e)
-        ' Initialiser l'indication durée buffer graphique
-        MettreAJourBuffer()
         ' 1. Charger la bibliothèque de périphériques (avant les onglets Centrale)
         _ongletPeripheriques.ChargerDepuisConfig()
 

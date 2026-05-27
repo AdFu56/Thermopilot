@@ -66,10 +66,7 @@ Public Class OngletVisuCSV
 
     ' ─── Persistance ─────────────────────────────────────────────────────────
 
-    ''' <summary>
-    ''' Ouvre un fichier CSV dans l'onglet Résultats courant.
-    ''' Appelé depuis FormPrincipal après une copie TEMP_.
-    ''' </summary>
+    '''<summary>Ouvre un fichier CSV dans l'onglet Résultats courant.</summary>
     Public Sub OuvrirFichier(chemin As String)
         If String.IsNullOrEmpty(chemin) OrElse Not IO.File.Exists(chemin) Then Return
         Dim idx = _tabResultats.SelectedIndex
@@ -126,9 +123,6 @@ Public Class OngletVisuCSV
             If calcsMasques  Then panneau.MasquerCalcs()
             If tableauMasque Then panneau.MasquerTableau()
             panneau.ChargerStyles(Config, "Resultats_Onglet" & i)
-            ' Assigner Config et SectionConfig au panneau graphique AVANT ChargerFichier
-            ' pour que DefinirSeries charge les styles par série dans la bonne section
-            panneau.SetConfigGraphique(Config, "Resultats_Onglet" & i)
             ' Recharger le fichier CSV si existant
             If fichier <> "" AndAlso IO.File.Exists(fichier) Then
                 panneau.ChargerFichier(fichier)
@@ -139,7 +133,7 @@ Public Class OngletVisuCSV
         End If
     End Sub
 
-    Private Sub AjouterOnglet(sender As Object, e As EventArgs)
+    Public Sub AjouterOnglet(sender As Object, e As EventArgs)
         _compteurOnglet += 1
         Dim page As New TabPage("Résultats " & _compteurOnglet)
         Dim panneau As New PanneauVisuCSV()
@@ -212,7 +206,6 @@ Public Class PanneauVisuCSV
     Private _btnModeGraphique    As New Button()
     Private _splitGauche         As SplitContainer = Nothing
     Private _splitDroite         As SplitContainer = Nothing
-    Private _tblCalc             As TableLayoutPanel = Nothing  ' référence pour toggle aide
 
     Private _colonnes         As New List(Of String)
     Private _indicesColonnes  As New List(Of Integer) ' correspondance lstSeries(k) → _colonnes(idx)
@@ -270,16 +263,6 @@ Public Class PanneauVisuCSV
     Public Sub ChargerStyles(cfg As ConfigManager, section As String)
         If cfg Is Nothing Then Return
         _panelGraphe.Styles.ChargerDepuisConfig(cfg, section)
-    End Sub
-
-    ''' <summary>
-    ''' Configure le ConfigManager et la section du panneau graphique.
-    ''' À appeler AVANT ChargerFichier pour que DefinirSeries charge les styles par série.
-    ''' </summary>
-    Public Sub SetConfigGraphique(cfg As ConfigManager, section As String)
-        If cfg Is Nothing Then Return
-        _panelGraphe.SectionConfig = section
-        _panelGraphe.Config        = cfg
     End Sub
 
     Public Function ConstruirePanel() As Control
@@ -357,19 +340,11 @@ Public Class PanneauVisuCSV
                                _btnModeGraphique, _lblInfo})
 
         ' Corps principal : gauche (TabControl Voies/Calculs) | droite (graphique+tableau)
-        Dim splitMain As New SplitContainer() With {.Dock = DockStyle.Fill}
+        Dim splitMain As New SplitContainer() With {
+            .Dock = DockStyle.Fill, .Panel1MinSize = 260}
         AddHandler splitMain.HandleCreated,
             Sub(sc, ev)
-                splitMain.BeginInvoke(New Action(Sub()
-                    Try
-                        splitMain.Panel1MinSize = 260
-                        If 300 >= splitMain.Panel1MinSize AndAlso
-                           300 <= splitMain.Width - 10 Then
-                            splitMain.SplitterDistance = 300
-                        End If
-                    Catch
-                    End Try
-                End Sub))
+                Try : splitMain.SplitterDistance = 300 : Catch : End Try
             End Sub
 
         ' ── Panneau gauche : TabControl Voies / Calculs ──
@@ -378,102 +353,97 @@ Public Class PanneauVisuCSV
         Dim tabPageVoies  As New TabPage("📈 Mesures")
         Dim tabPageCalcs  As New TabPage("🧮 Calculs")
 
-        ' ── Onglet Voies : SplitContainer Mesures (haut) / Variables calculées (bas) ──
-        Dim splitVoies As New SplitContainer() With {
-            .Dock        = DockStyle.Fill,
-            .Orientation = Orientation.Horizontal}
-        AddHandler splitVoies.HandleCreated,
-            Sub(sc, ev)
-                splitVoies.BeginInvoke(New Action(Sub()
-                    Try
-                        splitVoies.Panel1MinSize = 60
-                        splitVoies.Panel2MinSize = 40
-                        Dim d = CInt(splitVoies.Height * 0.65)
-                        If d >= splitVoies.Panel1MinSize AndAlso
-                           d <= splitVoies.Height - splitVoies.Panel2MinSize Then
-                            splitVoies.SplitterDistance = d
-                        End If
-                    Catch
-                    End Try
-                End Sub))
-            End Sub
+        ' ── Onglet Mesures : TableLayoutPanel 6 lignes ──
+        ' ── Onglet Mesures : panels imbriqués à hauteurs fixes ──
+        Dim pnlVoiesOuter As New Panel() With {.Dock = DockStyle.Fill}
 
-        ' Panneau haut : liste Mesures
-        Dim pnlMesures As New Panel() With {.Dock = DockStyle.Fill}
+        ' Zone basse fixe : VARIABLES CALCULÉES
+        ' Structure : lblCalcsVisu(Top) → pnlBtnsCalcs(Top) → _lstCalcsVisu(Fill)
+        Dim pnlCalcsVisuZone As New Panel() With {.Dock = DockStyle.Bottom, .Height = 160}
+
+        Dim lblCalcsVisu As New Label() With {
+            .Text = "VARIABLES CALCULÉES", .Dock = DockStyle.Top, .Height = 22,
+            .Font = New Font("Segoe UI", 8, FontStyle.Bold),
+            .ForeColor = Color.FromArgb(80, 130, 190), .BackColor = Color.FromArgb(240, 244, 252),
+            .Padding = New Padding(4, 4, 0, 0)}
+
+        Dim pnlBtnsCalcs As New Panel() With {.Dock = DockStyle.Top, .Height = 28}
+        Dim btnToutCalcs  As New Button() With {.Text = "Tout",  .Width = 50, .Height = 24, .Left = 4,  .Top = 2, .FlatStyle = FlatStyle.Flat}
+        Dim btnAucunCalcs As New Button() With {.Text = "Aucun", .Width = 55, .Height = 24, .Left = 58, .Top = 2, .FlatStyle = FlatStyle.Flat}
+        AddHandler btnToutCalcs.Click, Sub(s, e)
+            For j As Integer = 0 To _lstCalcsVisu.Items.Count - 1
+                _lstCalcsVisu.SetItemChecked(j, True)
+            Next
+        End Sub
+        AddHandler btnAucunCalcs.Click, Sub(s, e)
+            For j As Integer = 0 To _lstCalcsVisu.Items.Count - 1
+                _lstCalcsVisu.SetItemChecked(j, False)
+            Next
+        End Sub
+        pnlBtnsCalcs.Controls.AddRange({btnToutCalcs, btnAucunCalcs})
+
+        _lstCalcsVisu.Dock = DockStyle.Fill
+        _lstCalcsVisu.Font = New Font("Segoe UI", 8.5) : _lstCalcsVisu.CheckOnClick = True
+
+        ' lblCalcsVisu Top, pnlBtnsCalcs Top juste dessous, _lstCalcsVisu Fill
+        pnlCalcsVisuZone.Controls.Add(_lstCalcsVisu)     ' Fill — ajouté en dernier
+        pnlCalcsVisuZone.Controls.Add(pnlBtnsCalcs)      ' Top — ajouté avant Fill
+        pnlCalcsVisuZone.Controls.Add(lblCalcsVisu)      ' Top — ajouté en dernier → tout en haut
+
+        ' Zone haute : MESURES
+        ' Structure : lblSeries(Top) → pnlBtns(Top) → _lstSeries(Fill)
         Dim lblSeries As New Label() With {
             .Text = "MESURES", .Dock = DockStyle.Top, .Height = 20,
             .Font = New Font("Segoe UI", 8, FontStyle.Bold),
             .ForeColor = Color.FromArgb(80, 130, 190), .Padding = New Padding(4, 2, 0, 0)}
+
+        Dim pnlBtns As New Panel() With {.Dock = DockStyle.Top, .Height = 28}
+        _btnTout.Text = "Tout"   : _btnTout.Width  = 50 : _btnTout.Height  = 24
+        _btnTout.Left = 4  : _btnTout.Top = 2 : _btnTout.FlatStyle = FlatStyle.Flat
+        _btnAucun.Text = "Aucun" : _btnAucun.Width = 55 : _btnAucun.Height = 24
+        _btnAucun.Left = 58 : _btnAucun.Top = 2 : _btnAucun.FlatStyle = FlatStyle.Flat
+        pnlBtns.Controls.AddRange({_btnTout, _btnAucun})
+
         _lstSeries.Dock = DockStyle.Fill
         _lstSeries.Font = New Font("Segoe UI", 8.5) : _lstSeries.CheckOnClick = True
-        Dim pnlBtns As New FlowLayoutPanel() With {
-            .Dock = DockStyle.Bottom, .Height = 28, .Padding = New Padding(2, 2, 0, 0)}
-        _btnTout.Text = "Tout"   : _btnTout.Width  = 50 : _btnTout.Height  = 22
-        _btnAucun.Text = "Aucun" : _btnAucun.Width = 55 : _btnAucun.Height = 22
-        _btnTout.FlatStyle = FlatStyle.Flat : _btnAucun.FlatStyle = FlatStyle.Flat
-        pnlBtns.Controls.AddRange({_btnTout, _btnAucun})
-        pnlMesures.Controls.Add(_lstSeries)
-        pnlMesures.Controls.Add(pnlBtns)
-        pnlMesures.Controls.Add(lblSeries)
-        splitVoies.Panel1.Controls.Add(pnlMesures)
 
-        ' Panneau bas : Variables calculées
-        Dim pnlCalcsVisu As New Panel() With {.Dock = DockStyle.Fill}
-        Dim lblCalcsVisu As New Label() With {
-            .Text = "VARIABLES CALCULÉES", .Dock = DockStyle.Top, .Height = 20,
-            .Font = New Font("Segoe UI", 8, FontStyle.Bold),
-            .ForeColor = Color.FromArgb(80, 130, 190), .BackColor = Color.FromArgb(240, 244, 252),
-            .Padding = New Padding(4, 2, 0, 0)}
-        _lstCalcsVisu.Dock = DockStyle.Fill
-        _lstCalcsVisu.Font = New Font("Segoe UI", 8.5) : _lstCalcsVisu.CheckOnClick = True
-        pnlCalcsVisu.Controls.Add(_lstCalcsVisu)
-        pnlCalcsVisu.Controls.Add(lblCalcsVisu)
-        splitVoies.Panel2.Controls.Add(pnlCalcsVisu)
+        ' lblSeries Top, pnlBtns Top juste dessous, _lstSeries Fill
+        pnlVoiesOuter.Controls.Add(_lstSeries)        ' Fill — en dernier
+        pnlVoiesOuter.Controls.Add(pnlCalcsVisuZone)  ' Bottom
+        pnlVoiesOuter.Controls.Add(pnlBtns)           ' Top — avant Fill
+        pnlVoiesOuter.Controls.Add(lblSeries)         ' Top — en dernier → tout en haut
+        tabPageVoies.Controls.Add(pnlVoiesOuter)
 
-        tabPageVoies.Controls.Add(splitVoies)
-
-        ' ── Onglet Calculs : SplitContainer liste (haut) / éditeur scrollable (bas) ──
+        ' ── Onglet Calculs ──
         Dim pnlCalcs As New Panel() With {.Dock = DockStyle.Fill, .BackColor = Color.White}
-        Dim splitCalcs As New SplitContainer() With {
-            .Dock = DockStyle.Fill, .Orientation = Orientation.Horizontal}
-        AddHandler splitCalcs.HandleCreated,
-            Sub(sc, ev)
-                splitCalcs.BeginInvoke(New Action(Sub()
-                    Try
-                        splitCalcs.Panel1MinSize = 90
-                        splitCalcs.Panel2MinSize = 180
-                        Dim d = CInt(splitCalcs.Height * 0.30)
-                        If d < splitCalcs.Panel1MinSize Then d = splitCalcs.Panel1MinSize
-                        If d <= splitCalcs.Height - splitCalcs.Panel2MinSize Then
-                            splitCalcs.SplitterDistance = d
-                        End If
-                    Catch
-                    End Try
-                End Sub))
-            End Sub
 
-        ' ── Panel haut : liste + bouton Supprimer ──
         _lstCalcs.Dock = DockStyle.Fill
         _lstCalcs.Font = New Font("Segoe UI", 8.5)
+        Dim lstPanel As New Panel() With {.Dock = DockStyle.Top, .Height = 100}
+        _lstCalcs.Dock = DockStyle.Fill
         Dim flSuppr As New FlowLayoutPanel() With {
-            .Dock = DockStyle.Bottom, .Height = 28, .Padding = New Padding(2, 2, 0, 0)}
-        _btnCalcSuppr.Text = "✕ Supprimer" : _btnCalcSuppr.Height = 24 : _btnCalcSuppr.Width = 95
+            .Dock = DockStyle.Bottom, .Height = 30, .Padding = New Padding(2, 2, 0, 0)}
+        _btnCalcSuppr.Text = "✕ Supprimer" : _btnCalcSuppr.Height = 26 : _btnCalcSuppr.Width = 95
         _btnCalcSuppr.FlatStyle = FlatStyle.Flat
         _btnCalcSuppr.BackColor = Color.FromArgb(140, 40, 40) : _btnCalcSuppr.ForeColor = Color.White
         flSuppr.Controls.Add(_btnCalcSuppr)
-        splitCalcs.Panel1.Controls.Add(_lstCalcs)
-        splitCalcs.Panel1.Controls.Add(flSuppr)
+        lstPanel.Controls.Add(_lstCalcs)
+        lstPanel.Controls.Add(flSuppr)
 
-        ' ── Panel bas : éditeur avec scroll ──
-        Dim scrollEditeur As New Panel() With {.Dock = DockStyle.Fill, .AutoScroll = True, .BackColor = Color.White}
+        Dim tblCalc As New TableLayoutPanel() With {
+            .Dock = DockStyle.Fill, .ColumnCount = 1, .RowCount = 8,
+            .BackColor = Color.White, .Padding = New Padding(2)}
+        tblCalc.RowStyles.Add(New RowStyle(SizeType.Absolute, 32))  ' Nom/Unité/Moy
+        tblCalc.RowStyles.Add(New RowStyle(SizeType.Absolute, 32))  ' Insérer colonne
+        tblCalc.RowStyles.Add(New RowStyle(SizeType.Absolute, 20))  ' label Expression
+        tblCalc.RowStyles.Add(New RowStyle(SizeType.Percent, 100))  ' Expression extensible
+        tblCalc.RowStyles.Add(New RowStyle(SizeType.Absolute, 20))  ' résultat test
+        tblCalc.RowStyles.Add(New RowStyle(SizeType.Absolute, 32))  ' boutons Calculer+Tester
+        tblCalc.RowStyles.Add(New RowStyle(SizeType.Absolute, 24))  ' bouton toggle aide
+        tblCalc.RowStyles.Add(New RowStyle(SizeType.Absolute, 0))   ' aide repliable
 
-        Dim pnlEditeur As New Panel() With {
-            .BackColor = Color.White, .Padding = New Padding(4),
-            .AutoSize = True, .AutoSizeMode = AutoSizeMode.GrowAndShrink}
-
-        ' Ligne 0 : Nom / Unité / Moy
-        Dim pnlNomUnite As New FlowLayoutPanel() With {
-            .AutoSize = True, .BackColor = Color.White, .Margin = New Padding(0, 2, 0, 2)}
+        ' L0 : Nom / Unité / Moy
+        Dim pnlNomUnite As New FlowLayoutPanel() With {.Dock = DockStyle.Fill, .BackColor = Color.White}
         _txtCalcNom.Width = 85 : _txtCalcNom.Font = New Font("Segoe UI", 8.5) : _txtCalcNom.Margin = New Padding(0, 3, 4, 0)
         _txtCalcUnite.Width = 48 : _txtCalcUnite.Font = New Font("Segoe UI", 8.5) : _txtCalcUnite.Margin = New Padding(0, 3, 4, 0)
         _numCalcMoy.Minimum = 1 : _numCalcMoy.Maximum = 200 : _numCalcMoy.Value = 1
@@ -486,113 +456,96 @@ Public Class PanneauVisuCSV
             New Label() With {.Text="Moy.:",.AutoSize=True,.Margin=New Padding(0,6,2,0),.ForeColor=Color.FromArgb(40,60,100)},
             _numCalcMoy})
 
-        ' Ligne 1 : Insérer colonne
-        Dim pnlInserer As New FlowLayoutPanel() With {.AutoSize = True, .BackColor = Color.White, .Margin = New Padding(0, 2, 0, 2)}
+        ' L1 : Insérer colonne
+        Dim pnlInserer As New FlowLayoutPanel() With {.Dock = DockStyle.Fill, .BackColor = Color.White}
         _cmbColonnes.DropDownStyle = ComboBoxStyle.DropDownList
-        _cmbColonnes.Width = 150 : _cmbColonnes.Font = New Font("Consolas", 7.5) : _cmbColonnes.Margin = New Padding(0, 2, 4, 0)
-        _btnInsererCalc.Text = "← Insérer" : _btnInsererCalc.Height = 24 : _btnInsererCalc.Width = 72
+        _cmbColonnes.Width = 130 : _cmbColonnes.Font = New Font("Consolas", 7.5) : _cmbColonnes.Margin = New Padding(0, 3, 4, 0)
+        _cmbColonnes.DropDownWidth = 320
+        _btnInsererCalc.Text = "← Insérer" : _btnInsererCalc.Height = 26 : _btnInsererCalc.Width = 78
         _btnInsererCalc.FlatStyle = FlatStyle.Flat
         _btnInsererCalc.BackColor = Color.FromArgb(70, 80, 110) : _btnInsererCalc.ForeColor = Color.White
         _btnInsererCalc.Margin = New Padding(0, 2, 0, 0)
         pnlInserer.Controls.AddRange({
-            New Label() With {.Text="Insérer :",.AutoSize=True,.Margin=New Padding(0,6,3,0),.ForeColor=Color.FromArgb(40,60,100)},
+            New Label() With {.Text="Insérer :",.AutoSize=True,.Margin=New Padding(0,7,3,0),.ForeColor=Color.FromArgb(40,60,100)},
             _cmbColonnes, _btnInsererCalc})
 
-        ' Label Expression
+        ' L2 : label Expression
         Dim lblExprCalc As New Label() With {
-            .Text = "Expression mathématique :", .AutoSize = True,
-            .Font = New Font("Segoe UI", 8, FontStyle.Bold), .ForeColor = Color.FromArgb(40, 60, 100),
-            .Margin = New Padding(0, 4, 0, 1)}
+            .Text = "Expression mathématique :", .Dock = DockStyle.Fill,
+            .Font = New Font("Segoe UI", 8, FontStyle.Bold), .ForeColor = Color.FromArgb(40, 60, 100)}
 
-        ' Zone expression
-        _txtCalcExpr.Multiline = True : _txtCalcExpr.Height = 55
+        ' L3 : zone expression
+        _txtCalcExpr.Dock = DockStyle.Fill : _txtCalcExpr.Multiline = True
         _txtCalcExpr.ScrollBars = ScrollBars.Vertical
         _txtCalcExpr.Font = New Font("Consolas", 9)
         _txtCalcExpr.BackColor = Color.FromArgb(245, 248, 255) : _txtCalcExpr.ForeColor = Color.FromArgb(20, 60, 140)
-        _txtCalcExpr.Width = 240 : _txtCalcExpr.Margin = New Padding(0, 0, 0, 2)
 
-        ' Résultat test
-        _lblResultatCalc.AutoSize = True
+        ' L4 : résultat test
+        _lblResultatCalc.Dock = DockStyle.Fill
         _lblResultatCalc.Font = New Font("Segoe UI", 8, FontStyle.Bold)
         _lblResultatCalc.ForeColor = Color.FromArgb(0, 140, 70) : _lblResultatCalc.Text = ""
-        _lblResultatCalc.Margin = New Padding(0, 0, 0, 2)
 
-        ' Boutons Calculer + Tester — même hauteur, même Padding vertical, alignés
-        Dim pnlBtnsCalc As New FlowLayoutPanel() With {
-            .AutoSize = True, .BackColor = Color.White,
-            .Margin = New Padding(0, 2, 0, 4), .WrapContents = False}
-        _btnCalcAjouter.Text = "➕ Calculer" : _btnCalcAjouter.Height = 26 : _btnCalcAjouter.Width = 92
+        ' L5 : boutons Calculer + Tester
+        Dim pnlBtnsCalc As New FlowLayoutPanel() With {.Dock = DockStyle.Fill, .BackColor = Color.White}
+        _btnCalcAjouter.Text = "➕ Calculer" : _btnCalcAjouter.Height = 26 : _btnCalcAjouter.Width = 95
         _btnCalcAjouter.FlatStyle = FlatStyle.Flat
         _btnCalcAjouter.BackColor = Color.FromArgb(40, 110, 60) : _btnCalcAjouter.ForeColor = Color.White
-        _btnCalcAjouter.Margin = New Padding(0, 0, 6, 0)
-        _btnTesterCalc.Text = "▶ Tester" : _btnTesterCalc.Height = 26 : _btnTesterCalc.Width = 76
+        _btnCalcAjouter.Margin = New Padding(0, 2, 6, 0)
+        _btnTesterCalc.Text = "▶ Tester" : _btnTesterCalc.Height = 26 : _btnTesterCalc.Width = 78
         _btnTesterCalc.FlatStyle = FlatStyle.Flat
         _btnTesterCalc.BackColor = Color.FromArgb(40, 100, 160) : _btnTesterCalc.ForeColor = Color.White
-        _btnTesterCalc.Margin = New Padding(0, 0, 0, 0)
+        _btnTesterCalc.Margin = New Padding(0, 2, 0, 0)
         pnlBtnsCalc.Controls.AddRange({_btnCalcAjouter, _btnTesterCalc})
 
-        ' Bouton toggle aide + zone aide avec AutoScroll pour lire toutes les lignes
+        ' L6 : bouton toggle aide
         Dim btnAideR As New Button() With {
-            .Text = "▼ Aide syntaxe", .Height = 22, .Width = 240,
+            .Text = "▼ Aide syntaxe", .Dock = DockStyle.Fill,
             .Font = New Font("Segoe UI", 7.5, FontStyle.Bold), .FlatStyle = FlatStyle.Flat,
             .BackColor = Color.FromArgb(200, 215, 240), .ForeColor = Color.FromArgb(20, 40, 80),
-            .TextAlign = ContentAlignment.MiddleLeft, .Margin = New Padding(0, 0, 0, 0)}
+            .TextAlign = ContentAlignment.MiddleLeft, .Margin = New Padding(0)}
         btnAideR.FlatAppearance.BorderSize = 0
 
+        ' L7 : aide repliable
         Dim pnlAideR As New Panel() With {
-            .BackColor = Color.FromArgb(230, 240, 255), .Visible = False,
-            .Height = 130, .Width = 240, .Margin = New Padding(0),
+            .Dock = DockStyle.Fill, .BackColor = Color.FromArgb(230, 240, 255),
             .Padding = New Padding(6, 3, 6, 3), .AutoScroll = True}
         Dim lblAideR As New Label() With {
             .AutoSize = True, .Font = New Font("Segoe UI", 7.5),
             .ForeColor = Color.FromArgb(20, 40, 80), .BackColor = Color.Transparent,
             .Text = "Opérateurs : + − * / ^   abs sqrt ln log10 exp sin cos tan min(a,b) max(a,b)" & vbCrLf &
-                    "Constantes : pi  e" & vbCrLf &
-                    "Référence colonne : {C2}  (C1=Horodatage, C2=Durée, C3=1ère voie...)" & vbCrLf &
-                    "Intégration : int(expr, t_debut, t_fin)  — dt estimé depuis le CSV" & vbCrLf &
+                    "Constantes : pi  e   Référence colonne : {C2}  (C1=Horodatage, C2=Durée, C3=1ère voie...)" & vbCrLf &
+                    "Intégration : int(expr, t_debut, t_fin)  — dt estimé automatiquement depuis le CSV" & vbCrLf &
                     "  int({C3},,)          intégrale de C3 sur tout le fichier" & vbCrLf &
                     "  int({C3},1800[s],)   depuis t=1800s" & vbCrLf &
                     "  int({C3},30[min],2[h])  entre 30min et 2h" & vbCrLf &
-                    "  NE PAS écrire *dt — c'est int() qui l'applique"}
+                    "  NE PAS écrire *dt dans l'expression — c'est int() qui l'applique"}
         pnlAideR.Controls.Add(lblAideR)
 
-        ' Toggle aide via Visible
         AddHandler btnAideR.Click, Sub(s, e)
-            pnlAideR.Visible = Not pnlAideR.Visible
-            btnAideR.Text = If(pnlAideR.Visible, "▲ Aide syntaxe", "▼ Aide syntaxe")
+            Dim rowAide = tblCalc.RowStyles(7)
+            If rowAide.Height < 1 Then
+                rowAide.SizeType = SizeType.Absolute
+                rowAide.Height = 75
+                btnAideR.Text = "▲ Aide syntaxe"
+            Else
+                rowAide.SizeType = SizeType.Absolute
+                rowAide.Height = 0
+                btnAideR.Text = "▼ Aide syntaxe"
+            End If
+            tblCalc.PerformLayout()
         End Sub
 
-        ' Empiler les contrôles dans pnlEditeur (FlowLayout vertical)
-        Dim flowEdit As New FlowLayoutPanel() With {
-            .Dock = DockStyle.Top, .AutoSize = True, .AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            .FlowDirection = FlowDirection.TopDown,
-            .WrapContents = False, .AutoScroll = False,
-            .BackColor = Color.White, .Padding = New Padding(4, 4, 4, 4)}
+        tblCalc.Controls.Add(pnlNomUnite,     0, 0)
+        tblCalc.Controls.Add(pnlInserer,       0, 1)
+        tblCalc.Controls.Add(lblExprCalc,      0, 2)
+        tblCalc.Controls.Add(_txtCalcExpr,     0, 3)
+        tblCalc.Controls.Add(_lblResultatCalc, 0, 4)
+        tblCalc.Controls.Add(pnlBtnsCalc,      0, 5)
+        tblCalc.Controls.Add(btnAideR,         0, 6)
+        tblCalc.Controls.Add(pnlAideR,         0, 7)
 
-        ' Adapter la largeur des contrôles au resize
-        AddHandler flowEdit.Resize, Sub(s, e)
-            Dim w = Math.Max(100, flowEdit.ClientSize.Width - 8)
-            pnlNomUnite.MaximumSize   = New Size(w, 0)
-            pnlInserer.MaximumSize    = New Size(w, 0)
-            _txtCalcExpr.Width        = w
-            pnlBtnsCalc.MaximumSize   = New Size(w, 0)
-            btnAideR.Width            = w
-            pnlAideR.Width            = w
-        End Sub
-
-        flowEdit.Controls.Add(pnlNomUnite)
-        flowEdit.Controls.Add(pnlInserer)
-        flowEdit.Controls.Add(lblExprCalc)
-        flowEdit.Controls.Add(_txtCalcExpr)
-        flowEdit.Controls.Add(_lblResultatCalc)
-        flowEdit.Controls.Add(pnlBtnsCalc)
-        flowEdit.Controls.Add(btnAideR)
-        flowEdit.Controls.Add(pnlAideR)
-
-        scrollEditeur.Controls.Add(flowEdit)
-        splitCalcs.Panel2.Controls.Add(scrollEditeur)
-
-        pnlCalcs.Controls.Add(splitCalcs)
+        pnlCalcs.Controls.Add(tblCalc)
+        pnlCalcs.Controls.Add(lstPanel)
         tabPageCalcs.Controls.Add(pnlCalcs)
 
         tabGauche.TabPages.Add(tabPageVoies)
@@ -602,19 +555,11 @@ Public Class PanneauVisuCSV
 
         ' ── Panneau droit : graphique (haut) + tableau (bas) ──
         Dim splitDroite As New SplitContainer() With {
-            .Dock = DockStyle.Fill, .Orientation = Orientation.Horizontal}
+            .Dock = DockStyle.Fill, .Orientation = Orientation.Horizontal,
+            .Panel1MinSize = 100}
         AddHandler splitDroite.HandleCreated,
             Sub(sc, ev)
-                splitDroite.BeginInvoke(New Action(Sub()
-                    Try
-                        splitDroite.Panel1MinSize = 100
-                        Dim d = Math.Max(100, CInt(splitDroite.Height * 0.65))
-                        If d <= splitDroite.Height - 10 Then
-                            splitDroite.SplitterDistance = d
-                        End If
-                    Catch
-                    End Try
-                End Sub))
+                Try : splitDroite.SplitterDistance = Math.Max(100, CInt(splitDroite.Height * 0.65)) : Catch : End Try
             End Sub
         _splitDroite = splitDroite
 
@@ -630,7 +575,6 @@ Public Class PanneauVisuCSV
         _dgvDonnees.RowHeadersVisible = False
         _dgvDonnees.Font = New Font("Consolas", 8)
         _dgvDonnees.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None
-        _dgvDonnees.ScrollBars = ScrollBars.Both
         splitDroite.Panel2.Controls.Add(_dgvDonnees)
         splitDroite.Panel2.Controls.Add(_lblStats)
 
@@ -656,9 +600,10 @@ Public Class PanneauVisuCSV
                     _lstCalcsVisu.BeginInvoke(New Action(AddressOf ConstruireHistoriqueEtGraphique))
                 End If
             End Sub
-        ' Note : on ne branche PAS les TextChanged sur AppliquerEditeurVersCalcVisu
-        ' pour éviter que la saisie d'un nouveau calcul modifie le précédent.
-        ' La synchronisation se fait uniquement via LstCalcs_SelectedIndexChanged et BtnCalcAjouter.
+        AddHandler _txtCalcNom.TextChanged,   Sub(s, e) AppliquerEditeurVersCalcVisu()
+        AddHandler _txtCalcUnite.TextChanged, Sub(s, e) AppliquerEditeurVersCalcVisu()
+        AddHandler _txtCalcExpr.TextChanged,  Sub(s, e) AppliquerEditeurVersCalcVisu()
+        AddHandler _numCalcMoy.ValueChanged,  Sub(s, e) AppliquerEditeurVersCalcVisu()
         AddHandler _btnMasquerCalcs.Click, Sub(s, e)
             ' Dans la nouvelle disposition, l'onglet Calculs est dans tabGauche
             ' Masquer calculs = masquer la tab "Calculs" et réduire le panneau gauche
@@ -755,8 +700,6 @@ Public Class PanneauVisuCSV
                 _lignes.Add(cellules)
                 Dim dt As DateTime
                 Dim raw = cellules(0).Trim()
-                ' Essayer d'abord le format exact Thermopilot "yyyy-MM-dd HH:mm:ss"
-                ' puis les variantes courantes, puis le TryParse générique en dernier recours
                 Dim ok = DateTime.TryParseExact(raw, "yyyy-MM-dd HH:mm:ss",
                     System.Globalization.CultureInfo.InvariantCulture,
                     Globalization.DateTimeStyles.None, dt)
@@ -764,6 +707,9 @@ Public Class PanneauVisuCSV
                     System.Globalization.CultureInfo.InvariantCulture,
                     Globalization.DateTimeStyles.None, dt)
                 If Not ok Then ok = DateTime.TryParseExact(raw, "dd/MM/yyyy HH:mm:ss",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    Globalization.DateTimeStyles.None, dt)
+                If Not ok Then ok = DateTime.TryParseExact(raw, "dd/MM/yyyy HH:mm",
                     System.Globalization.CultureInfo.InvariantCulture,
                     Globalization.DateTimeStyles.None, dt)
                 If Not ok Then ok = DateTime.TryParse(raw,
@@ -776,12 +722,11 @@ Public Class PanneauVisuCSV
                 RaiseEvent StatutChange(Me, "Aucune donnée dans le fichier.", True) : Return
             End If
 
-            ' Tableau — limité à 50 000 lignes pour garder une interface réactive
-            Dim MAX_TABLEAU = 50000
+            ' Tableau (limité à 2000 lignes)
             For Each col In _colonnes
                 _dgvDonnees.Columns.Add(col.Replace(" ", "_"), col)
             Next
-            Dim maxR = Math.Min(_lignes.Count, MAX_TABLEAU)
+            Dim maxR = Math.Min(_lignes.Count, 2000)
             For r As Integer = 0 To maxR - 1
                 Dim lig = _lignes(r)
                 Dim idx = _dgvDonnees.Rows.Add()
@@ -808,10 +753,8 @@ Public Class PanneauVisuCSV
                _horodatages.Last() <> DateTime.MinValue Then
                 duree = (_horodatages.Last() - _horodatages.First()).TotalMinutes.ToString("F0") & " min"
             End If
-            Dim tronque = If(_lignes.Count > 50000,
-                String.Format(" ⚠ tableau tronqué à 50 000/{0} lignes", _lignes.Count), "")
-            _lblInfo.Text = String.Format("{0} mesures · {1} voies · {2}{3}",
-                _lignes.Count, _colonnes.Count - 1, duree, tronque)
+            _lblInfo.Text = String.Format("{0} mesures · {1} voies · {2}",
+                _lignes.Count, _colonnes.Count - 1, duree)
 
             AfficherStats()
             ConstruireHistoriqueEtGraphique()
@@ -838,28 +781,22 @@ Public Class PanneauVisuCSV
         For k As Integer = 0 To _indicesColonnes.Count - 1
             Dim colIdx = _indicesColonnes(k)  ' index dans _colonnes
             Dim nomCol = _colonnes(colIdx)
-            Dim nomLow = nomCol.ToLowerInvariant()
-            ' Sortie booléenne : entête contient "(on/off)"
-            Dim estBin      = nomLow.Contains("(on/off)")
-            ' Sortie analogique : entête contient "(v)" mais PAS une unité physique comme (°c), (l/h)…
-            ' On considère (V) seul (sans autre lettre collée) comme sortie analogique
-            Dim estSortieV  = Not estBin AndAlso
-                              (nomLow.EndsWith("(v)") OrElse nomLow.Contains(" (v)") OrElse nomLow.Contains("_(v)"))
+            Dim estBin = nomCol.ToLowerInvariant().Contains("on/off") OrElse
+                         nomCol.ToLowerInvariant().Contains("sortie") OrElse
+                         nomCol.ToLowerInvariant().Contains("relais")
             Dim cleIdx = colIdx + 1  ' {C(colIdx+1)} correspond à cette colonne
             Dim visible = (k < _lstSeries.Items.Count AndAlso _lstSeries.GetItemChecked(k))
             seriesBase.Add(New PanelGraphique.SerieGraphique() With {
-                .Cle          = "CSV_" & cleIdx,
-                .Nom          = SupprimerUnite(nomCol),
-                .NomCentrale  = "CSV",
-                .Unite        = ExtraireUnite(nomCol),
-                .EstBinaire   = estBin,
-                .EstSortieAnal = estSortieV,
-                .Visible      = visible
+                .Cle         = "CSV_" & cleIdx,
+                .Nom         = SupprimerUnite(nomCol),
+                .NomCentrale = "CSV",
+                .Unite       = ExtraireUnite(nomCol),
+                .EstBinaire  = estBin,
+                .Visible     = visible
             })
         Next
 
         Dim seriesCalc As New List(Of PanelGraphique.SerieGraphique)
-        Dim idxCalc As Integer = 0
         For i As Integer = 0 To _gestCalculs.Voies.Count - 1
             Dim vc = _gestCalculs.Voies(i)
             If Not vc.Active Then Continue For
@@ -867,12 +804,11 @@ Public Class PanneauVisuCSV
             seriesCalc.Add(New PanelGraphique.SerieGraphique() With {
                 .Cle         = vc.CleHistorique,
                 .Nom         = "[C] " & vc.Nom,
-                .NomCentrale = "Calcul#" & idxCalc.ToString(),
+                .NomCentrale = "Calcul",
                 .Unite       = vc.Unite,
                 .EstBinaire  = False,
                 .Visible     = visible
             })
-            idxCalc += 1
         Next
 
         _seriesVisu = seriesBase.Concat(seriesCalc).ToList()
@@ -880,30 +816,76 @@ Public Class PanneauVisuCSV
         ' Créer des voies calculées temporaires avec expressions traduites {Ci}→{CSV_i}
         ' On ne modifie PAS les expressions originales
         Dim gestCalcVisu As New GestionnaireCalculs()
-        Dim tmpIdx As Integer = 0
         For Each vcOrig In _gestCalculs.Voies.Where(Function(v) v.Active)
             Dim exprTrad = vcOrig.Expression
             For ci As Integer = 1 To _colonnes.Count
                 exprTrad = exprTrad.Replace("{C" & ci & "}", "{CSV_" & ci & "}")
             Next
-            ' Utiliser l'ID original pour que CleHistorique corresponde à seriesCalc
             Dim vcTmp As New VoieCalculee() With {
                 .Id              = vcOrig.Id,
-                .Nom             = vcOrig.Nom & "_visu_" & tmpIdx.ToString(),
+                .Nom             = vcOrig.Nom,
                 .Unite           = vcOrig.Unite,
                 .Expression      = exprTrad,
                 .Active          = True,
                 .NbPointsMoyenne = vcOrig.NbPointsMoyenne}
             gestCalcVisu.Voies.Add(vcTmp)
-            tmpIdx += 1
         Next
         gestCalcVisu.ResetIntegrations()
         Dim dtS = EstimerDt()
 
+        ' Détecter la colonne Durée (s) — base temps plus fiable que les horodatages tronqués
+        Dim idxDureeCol As Integer = -1
+        If _colonnes.Count > 1 Then
+            Dim nomCol2 = _colonnes(1).ToLowerInvariant()
+            If nomCol2.Contains("dur") OrElse nomCol2.Contains("(s)") OrElse
+               nomCol2.Contains("time") OrElse nomCol2.Contains("elapsed") Then
+                idxDureeCol = 1
+            End If
+        End If
+        ' Vérification numérique si non détecté par nom
+        If idxDureeCol < 0 AndAlso _lignes.Count >= 3 Then
+            Try
+                Dim v0 As Double, v1 As Double, v2 As Double
+                If Double.TryParse(_lignes(0)(1).Trim(), Globalization.NumberStyles.Float,
+                        Globalization.CultureInfo.InvariantCulture, v0) AndAlso
+                   Double.TryParse(_lignes(1)(1).Trim(), Globalization.NumberStyles.Float,
+                        Globalization.CultureInfo.InvariantCulture, v1) AndAlso
+                   Double.TryParse(_lignes(2)(1).Trim(), Globalization.NumberStyles.Float,
+                        Globalization.CultureInfo.InvariantCulture, v2) AndAlso
+                   v1 > v0 AndAlso v2 > v1 Then
+                    idxDureeCol = 1
+                End If
+            Catch
+            End Try
+        End If
+        Dim dureePrec As Double = Double.NaN
+
         For r As Integer = 0 To _lignes.Count - 1
             Dim lig   = _lignes(r)
             Dim horod = _horodatages(r)
+
+            ' Calculer dt depuis Durée AVANT le filtre MinValue
+            If idxDureeCol >= 0 AndAlso idxDureeCol < lig.Length Then
+                Dim dureeCourante As Double
+                If Double.TryParse(lig(idxDureeCol).Trim(),
+                        Globalization.NumberStyles.Float,
+                        Globalization.CultureInfo.InvariantCulture, dureeCourante) Then
+                    If Not Double.IsNaN(dureePrec) Then
+                        Dim dtDuree = dureeCourante - dureePrec
+                        If dtDuree > 0 Then dtS = dtDuree
+                    End If
+                    dureePrec = dureeCourante
+                End If
+            End If
+
             If horod = DateTime.MinValue Then Continue For
+
+            ' Fallback dt depuis horodatages si pas de colonne Durée
+            If idxDureeCol < 0 AndAlso r > 0 AndAlso
+               _horodatages(r - 1) <> DateTime.MinValue Then
+                Dim dtReel = (horod - _horodatages(r - 1)).TotalSeconds
+                If dtReel > 0 Then dtS = dtReel
+            End If
 
             For i As Integer = 0 To seriesBase.Count - 1
                 Dim colIdx = _indicesColonnes(i)  ' index réel dans _colonnes
@@ -916,9 +898,7 @@ Public Class PanneauVisuCSV
                     .Horodatage       = horod,
                     .Valeur           = If(ok, val, Double.NaN),
                     .ValeurGraphiqueB = If(seriesBase(i).EstBinaire,
-                                          If(ok AndAlso val > 0, 1.0, 0.0),
-                                          If(seriesBase(i).EstSortieAnal,
-                                             If(ok, val, Double.NaN), Double.NaN)),
+                                          If(ok AndAlso val > 0, 1.0, 0.0), Double.NaN),
                     .EnErreur         = Not ok
                 })
             Next
@@ -1090,7 +1070,6 @@ Public Class PanneauVisuCSV
             .NbPointsMoyenne = moy
         }
         _gestCalculs.Voies.Add(vc)
-        _indexEditeCalc = _gestCalculs.Voies.Count - 1
         Dim nomAff = If(nom <> "", nom, "(calcul " & _gestCalculs.Voies.Count & ")")
         _lstCalcs.Items.Add(nomAff)
         ' Sélectionner sans déclencher SelectedIndexChanged
@@ -1098,20 +1077,15 @@ Public Class PanneauVisuCSV
         _lstCalcs.SelectedIndex = _lstCalcs.Items.Count - 1
         AddHandler _lstCalcs.SelectedIndexChanged, AddressOf LstCalcs_SelectedIndexChanged
         _lstCalcsVisu.Items.Add(nomAff, True)
+        _indexEditeCalc = -1
 
         If _cheminCourant <> "" Then ConstruireHistoriqueEtGraphique()
     End Sub
 
     Private Sub BtnCalcSuppr_Click(sender As Object, e As EventArgs)
-        Dim idx = _lstCalcs.SelectedIndex
-        If idx < 0 Then Return
-        _gestCalculs.Voies.RemoveAt(idx)
-        _lstCalcs.Items.RemoveAt(idx)
-        ' Supprimer aussi de la liste Mesures
-        If idx < _lstCalcsVisu.Items.Count Then
-            _lstCalcsVisu.Items.RemoveAt(idx)
-        End If
-        _indexEditeCalc = -1
+        If _lstCalcs.SelectedIndex < 0 Then Return
+        _gestCalculs.Voies.RemoveAt(_lstCalcs.SelectedIndex)
+        _lstCalcs.Items.RemoveAt(_lstCalcs.SelectedIndex)
         If _cheminCourant <> "" Then ConstruireHistoriqueEtGraphique()
     End Sub
 

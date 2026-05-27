@@ -37,15 +37,15 @@ Public Class PanelGraphique
     ' ── Modèle public (compatible avec l'ancienne API) ─────────────────────────
 
     Public Class SerieGraphique
-        Public Property Cle          As String
-        Public Property Nom          As String
-        Public Property NomCentrale  As String
-        Public Property Unite        As String
-        Public Property EstBinaire   As Boolean
-        Public Property EstSortieAnal As Boolean = False  ' sortie analogique → axe droit "V"
-        Public Property Visible      As Boolean = True
-        Public Property Couleur      As Color
-        Public Property IndexAxeY    As Integer = 0
+        Public Property Cle         As String
+        Public Property Nom         As String
+        Public Property NomCentrale As String
+        Public Property Unite         As String
+        Public Property EstBinaire    As Boolean
+        Public Property EstSortieAnal As Boolean = False   ' sortie analogique (axe V dédié)
+        Public Property Visible       As Boolean = True
+        Public Property Couleur     As Color
+        Public Property IndexAxeY   As Integer = 0
     End Class
 
     ' ── Données ────────────────────────────────────────────────────────────────
@@ -68,28 +68,13 @@ Public Class PanelGraphique
             _configPourStyles = value
             ' Charger les styles globaux immédiatement
             If value IsNot Nothing Then
-                If _sectionConfig <> "" Then
-                    Styles.ChargerDepuisConfig(value, _sectionConfig)
-                Else
-                    Styles.ChargerDepuisConfig(value)
-                End If
+                Styles.ChargerDepuisConfig(value)
                 RebuildAxes()
                 _plotModel.InvalidatePlot(True)
             End If
         End Set
     End Property
     Private _configPourStyles As ConfigManager = Nothing
-
-    ''' <summary>Section INI dans laquelle sauvegarder/charger les styles (vide = section par défaut).</summary>
-    Public Property SectionConfig As String
-        Get
-            Return _sectionConfig
-        End Get
-        Set(value As String)
-            _sectionConfig = value
-        End Set
-    End Property
-    Private _sectionConfig As String = ""
 
     ''' <summary>Styles visuels personnalisés — partagé avec FormPersonnalisationGraphique.</summary>
     Public ReadOnly Styles As New StylesGraphique()
@@ -237,9 +222,6 @@ Public Class PanelGraphique
                 sg.Couleur   = _paletteBinaire(idxBin Mod _paletteBinaire.Length)
                 sg.IndexAxeY = -1
                 idxBin += 1
-            ElseIf sg.EstSortieAnal Then
-                sg.Couleur   = _paletteBinaire((idxBin + idxAnal) Mod _paletteBinaire.Length)
-                sg.IndexAxeY = -2   ' axe droit V
             Else
                 sg.Couleur   = _palette(idxAnal Mod _palette.Length)
                 sg.IndexAxeY = idxAnal
@@ -248,14 +230,11 @@ Public Class PanelGraphique
         Next
 
         ' Recharger les styles par série depuis la config (si un ConfigManager est disponible)
+        ' — les clés de séries sont connues maintenant, on peut les charger
         If _configPourStyles IsNot Nothing Then
             For Each sg In _series
                 Dim coulDef = OxyColor.FromRgb(sg.Couleur.R, sg.Couleur.G, sg.Couleur.B)
-                If _sectionConfig <> "" Then
-                    Styles.ChargerStyleSerie(_configPourStyles, _sectionConfig, sg.Cle, coulDef)
-                Else
-                    Styles.ChargerStyleSerie(_configPourStyles, sg.Cle, coulDef)
-                End If
+                Styles.ChargerStyleSerie(_configPourStyles, sg.Cle, coulDef)
                 ' Mettre à jour la couleur du SerieGraphique depuis le style chargé
                 Dim style = Styles.ObtenirStyle(sg.Cle, sg.Couleur)
                 sg.Couleur = Color.FromArgb(style.Couleur.R, style.Couleur.G, style.Couleur.B)
@@ -273,19 +252,6 @@ Public Class PanelGraphique
                     .XAxisKey            = "X",
                     .YAxisKey            = If(sg.Visible, "YBin", ""),
                     .TrackerFormatString = "{0}" & Chr(10) & "Heure : {2:HH:mm:ss}" & Chr(10) & "État : {4:F0}"
-                }
-                _plotModel.Series.Add(oxyS)
-                _oxySeries(sg.Cle) = oxyS
-            ElseIf sg.EstSortieAnal Then
-                Dim oxyS As New LineSeries() With {
-                    .Title               = String.Format("[{0}] {1} (V)", sg.NomCentrale, sg.Nom),
-                    .Color               = ToOxy(sg.Couleur),
-                    .StrokeThickness     = 2.0,
-                    .IsVisible           = sg.Visible,
-                    .XAxisKey            = "X",
-                    .YAxisKey            = If(sg.Visible, "YSortieV", ""),
-                    .MarkerType          = MarkerType.None,
-                    .TrackerFormatString = "{0}" & Chr(10) & "Heure : {2:HH:mm:ss}" & Chr(10) & "Tension : {4:F3} V"
                 }
                 _plotModel.Series.Add(oxyS)
                 _oxySeries(sg.Cle) = oxyS
@@ -319,6 +285,17 @@ Public Class PanelGraphique
         _plotModel.Axes.Clear()
         _oxyAxes.Clear()
         If axeX IsNot Nothing Then _plotModel.Axes.Add(axeX)
+
+        ' Ajouter un axe Y par défaut (clé vide) pour les séries masquées.
+        ' OxyPlot cherche un axe avec YAxisKey="" pour toute série masquée —
+        ' sans cet axe il lève "Cannot find axis with Key = """"
+        _plotModel.Axes.Add(New LinearAxis() With {
+            .Key      = "",
+            .Position = AxisPosition.Left,
+            .IsAxisVisible = False,   ' invisible mais présent pour OxyPlot
+            .Minimum  = Double.NaN,
+            .Maximum  = Double.NaN
+        })
 
         ' Styles globaux
         _plotModel.Background         = Styles.CouleurFond
@@ -357,15 +334,15 @@ Public Class PanelGraphique
             ax.TitleFontSize      = Styles.TaillePoliceAxesTitre
         End If
 
-        Dim seriesAnalVisibles = _series.Where(Function(s) Not s.EstBinaire AndAlso Not s.EstSortieAnal AndAlso s.Visible).ToList()
+        Dim seriesAnalVisibles = _series.Where(Function(s) Not s.EstBinaire AndAlso s.Visible).ToList()
         Dim seriesBinVisibles  = _series.Where(Function(s) s.EstBinaire AndAlso s.Visible).ToList()
-        Dim seriesSortieAnal   = _series.Where(Function(s) s.EstSortieAnal AndAlso s.Visible).ToList()
 
-        ' ── Axe droit ON/OFF (sorties booléennes) ──
+        ' ── Axes Y : un axe par UNITÉ (pas un par série) ──
+        ' Les séries de même unité partagent le même axe → moins d'axes, graphique lisible
+
         If seriesBinVisibles.Count > 0 Then
             _plotModel.Axes.Add(New LinearAxis() With {
                 .Position           = AxisPosition.Right,
-                .PositionTier       = 0,
                 .Minimum            = -0.1,
                 .Maximum            = 1.3,
                 .IsZoomEnabled      = False,
@@ -381,34 +358,6 @@ Public Class PanelGraphique
                 .TitleFontSize      = Styles.TaillePoliceAxesTitre,
                 .MajorStep          = 1
             })
-        End If
-
-        ' ── Axe droit Volt (sorties analogiques) ──
-        If seriesSortieAnal.Count > 0 Then
-            _plotModel.Axes.Add(New LinearAxis() With {
-                .Position           = AxisPosition.Right,
-                .PositionTier       = If(seriesBinVisibles.Count > 0, 1, 0),
-                .IsZoomEnabled      = True,
-                .IsPanEnabled       = True,
-                .TicklineColor      = OxyColor.FromRgb(80, 120, 180),
-                .TextColor          = Styles.CouleurTexte,
-                .AxislineColor      = OxyColor.FromRgb(80, 120, 180),
-                .MajorGridlineStyle = LineStyle.None,
-                .Key                = "YSortieV",
-                .Title              = "V",
-                .TitleColor         = OxyColor.FromRgb(80, 160, 220),
-                .FontSize           = Styles.TaillePoliceAxes,
-                .TitleFontSize      = Styles.TaillePoliceAxesTitre,
-                .MinimumPadding     = 0.1,
-                .MaximumPadding     = 0.1
-            })
-            ' Assigner les séries de sorties analogiques à cet axe
-            For Each sg In seriesSortieAnal
-                If _oxySeries.ContainsKey(sg.Cle) Then
-                    Dim ls = TryCast(_oxySeries(sg.Cle), LineSeries)
-                    If ls IsNot Nothing Then ls.YAxisKey = "YSortieV"
-                End If
-            Next
         End If
 
         ' Construire un axe par unité distincte
@@ -513,23 +462,19 @@ Public Class PanelGraphique
         If sg Is Nothing Then Return
         sg.Visible = visible
 
-        ' Mettre à jour la série OxyPlot
-        Dim ls As LineSeries = Nothing
-        If _oxySeries.ContainsKey(cle) Then ls = TryCast(_oxySeries(cle), LineSeries)
-        If ls IsNot Nothing Then
-            ls.IsVisible = visible
-            If sg.EstBinaire Then
-                ls.YAxisKey = If(visible, "YBin", "")
-            ElseIf sg.EstSortieAnal Then
-                ls.YAxisKey = If(visible, "YSortieV", "")
-            Else
-                ls.YAxisKey = "" ' RebuildAxes réassignera
+        If _oxySeries.ContainsKey(cle) Then
+            Dim ls = TryCast(_oxySeries(cle), LineSeries)
+            If ls IsNot Nothing Then
+                ls.IsVisible = visible
+                ' Séries masquées → axe par défaut (clé vide, invisible)
+                ' Séries visibles → RebuildAxes leur assignera le bon axe
+                ls.YAxisKey = If(visible, "", "")   ' toujours "" — RebuildAxes réassigne
             End If
         End If
 
-        ' Reconstruire les axes (ajoute ou retire l'axe Y de cette série)
         RebuildAxes()
-        _plotModel.InvalidatePlot(False)
+        If _historique IsNot Nothing Then MettreAJour(_historique)
+        _plotModel.InvalidatePlot(True)
     End Sub
 
     Public Sub MettreAJour(historique As HistoriqueMultiCentrale)

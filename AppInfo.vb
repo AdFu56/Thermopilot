@@ -6,12 +6,12 @@
 Public Module AppInfo
 
     ''' <summary>Version courante — ex: "v2.1b"</summary>
-    Public Const VERSION As String = "v2.1b"
+    Public Const VERSION As String = "v2.2"
 
     ''' <summary>Nom complet affiché dans la barre de titre et le splash.</summary>
     Public ReadOnly Property TitreComplet As String
         Get
-            Return "Thermopilot " & VERSION & " — Acquisition Multi-Centrale (IRDL PTR4)"
+            Return "Thermopilott " & VERSION & " — Acquisition Multi-Centrale (IRDL PTR4)"
         End Get
     End Property
 

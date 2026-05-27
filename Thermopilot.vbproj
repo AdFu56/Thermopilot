@@ -60,6 +60,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AppInfo.vb" />
+    <Compile Include="OngletVisuCSV.vb" />
     <Compile Include="Program.vb" />
     <Compile Include="FormSplash.vb">
       <SubType>Form</SubType>
@@ -87,7 +88,6 @@
     <Compile Include="OngletConnexion.vb" />
     <Compile Include="OngletCSV.vb" />
     <Compile Include="OngletVoies.vb" />
-    <Compile Include="OngletVisuCSV.vb" />
     <Compile Include="OngletSysteme.vb" />
     <Compile Include="PanneauInfoDebit.vb" />
     <Compile Include="MoteurAlarmes.vb" />
